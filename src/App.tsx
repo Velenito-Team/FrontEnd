@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import jsQR from 'jsqr'
 import { QRCodeCanvas } from 'qrcode.react'
+import { createInvoice as createBackendInvoice, getProducts, getReport, getSettings, readReceipt, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer, type Settings as OperatorSettings } from './services/api'
+import ProductsPage from './pages/ProductsPage'
+import SalesPage, { today } from './pages/SalesPage'
+import OverviewPage from './pages/OverviewPage'
+import SettingsPage, { readPreferences } from './pages/SettingsPage'
+import CustomerPicker from './components/CustomerPicker'
+import Modal from './components/Modal'
+import './workspace.css'
 import {
   Archive,
   ArrowRight,
@@ -18,7 +26,6 @@ import {
   FileDown,
   FilePlus2,
   FileScan,
-  Focus,
   LayoutDashboard,
   Maximize2,
   Monitor,
@@ -27,10 +34,8 @@ import {
   Package,
   Plus,
   QrCode,
-  RotateCcw,
   Search,
   Settings,
-  ShoppingBag,
   ShoppingCart,
   Trash2,
   Upload,
@@ -38,7 +43,9 @@ import {
   X,
 } from 'lucide-react'
 
-type Category = 'Todos' | 'Abarrotes' | 'Bebidas' | 'Lácteos' | 'Snacks' | 'Aseo'
+const DeviceViewer = lazy(() => import('./DeviceViewer'))
+
+type Category = string
 
 type Product = {
   id: string
@@ -49,6 +56,9 @@ type Product = {
   color: string
   icon: string
   tag?: string
+  unit: BackendProduct['unidad']
+  fractionable: boolean
+  lowStock: boolean
 }
 
 type CartItem = Product & { quantity: number }
@@ -70,37 +80,31 @@ type Invoice = {
   totals: { subtotal: number; tax: number; total: number }
 }
 
-const products: Product[] = [
-  { id: 'ARR-001', name: 'Arroz Diana 1 kg', category: 'Abarrotes', price: 4500, stock: 28, color: 'yellow', icon: '🍚', tag: 'Más vendido' },
-  { id: 'ACE-014', name: 'Aceite vegetal 900 ml', category: 'Abarrotes', price: 7900, stock: 16, color: 'gold', icon: '🫗' },
-  { id: 'LEC-009', name: 'Leche entera 1 L', category: 'Lácteos', price: 4200, stock: 14, color: 'blue', icon: '🥛', tag: 'Nuevo' },
-  { id: 'HUE-004', name: 'Huevos AA x12', category: 'Lácteos', price: 8900, stock: 8, color: 'orange', icon: '🥚' },
-  { id: 'GAS-021', name: 'Gaseosa Postobón 1.5 L', category: 'Bebidas', price: 6500, stock: 22, color: 'red', icon: '🥤' },
-  { id: 'AGU-017', name: 'Agua Cristal 600 ml', category: 'Bebidas', price: 2500, stock: 31, color: 'blue', icon: '💧' },
-  { id: 'PAP-006', name: 'Papas Margarita', category: 'Snacks', price: 3800, stock: 18, color: 'green', icon: '🥔' },
-  { id: 'ASE-003', name: 'Jabón Rey', category: 'Aseo', price: 2900, stock: 10, color: 'purple', icon: '🧼' },
-]
-
-const categories: Array<{ label: Category; count: string }> = [
-  { label: 'Todos', count: '24' },
-  { label: 'Abarrotes', count: '08' },
-  { label: 'Bebidas', count: '05' },
-  { label: 'Lácteos', count: '04' },
-  { label: 'Snacks', count: '04' },
-  { label: 'Aseo', count: '03' },
-]
-
 const currency = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-// QR v40/L admite hasta 2.953 bytes en modo byte; dejamos margen para que el
-// lector no trabaje al límite y para mantener el JSON estable en UTF-8.
-const QR_SAFE_LIMIT_BYTES = 2800
 
-function getInvoicePayloadBytes(items: CartItem[], invoiceNumber: string) {
-  return new TextEncoder().encode(JSON.stringify(createInvoice(items, invoiceNumber))).length
+function receiptUrl(token: string) {
+  const url = new URL(import.meta.env.VITE_PUBLIC_RECEIPT_URL || window.location.pathname, window.location.origin)
+  url.hash = `comprobante/${token}`
+  return url.href
 }
 
-function formatBytes(value: number) {
-  return value.toLocaleString('es-CO')
+function linkToken(value: string) {
+  return value.trim().match(/#comprobante\/([a-f0-9]{64})$/)?.[1]
+}
+
+function lineTotal(item: CartItem) {
+  // Los precios y cantidades del catálogo se convierten a decimal antes de redondear la línea.
+  const decimal = (value: number) => {
+    const [whole, fraction = ''] = value.toLocaleString('en-US', {
+      useGrouping: false, maximumFractionDigits: 12,
+    }).split('.')
+    return { value: BigInt(whole + fraction), scale: 10n ** BigInt(fraction.length) }
+  }
+  const price = decimal(item.price)
+  const quantity = decimal(item.quantity)
+  const numerator = price.value * quantity.value
+  const denominator = price.scale * quantity.scale
+  return Number((numerator * 2n + denominator) / (denominator * 2n))
 }
 
 function decodeImageFile(file: File): Promise<string> {
@@ -142,34 +146,86 @@ function money(value: number) {
   return currency.format(value).replace('COP', '$')
 }
 
-function createInvoice(items: CartItem[], invoiceNumber: string): Invoice {
-  const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0)
-  const tax = Math.round(subtotal * 0.19)
-
+function displayReceipt(receipt: BackendReceipt): Invoice {
   return {
     schemaVersion: '1.0',
-    invoiceNumber,
-    issuedAt: new Date().toISOString(),
+    invoiceNumber: `FAC-${receipt.id}`,
+    issuedAt: receipt.fecha,
     currency: 'COP',
-    paymentMethod: 'Pendiente',
-    seller: { name: 'Tienda El Veleñito', terminal: 'Caja 01' },
-    items: items.map((item) => ({
-      productId: item.id,
-      name: item.name,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      lineTotal: item.price * item.quantity,
+    paymentMethod: receipt.metodo,
+    seller: { name: receipt.tienda, terminal: 'Caja 01' },
+    items: receipt.lineas.map((line) => ({
+      productId: line.productoId, name: line.nombre, quantity: line.cantidad,
+      unitPrice: line.precioUnitario, lineTotal: line.subtotal,
     })),
-    totals: { subtotal, tax, total: subtotal + tax },
+    totals: { subtotal: receipt.total, tax: 0, total: receipt.total },
   }
 }
 
+function PublicReceipt({ token }: { token: string }) {
+  const [receipt, setReceipt] = useState<BackendReceipt>()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let active = true
+    setReceipt(undefined)
+    setFailed(false)
+    readReceipt(token).then((result) => { if (active) setReceipt(result) })
+      .catch(() => { if (active) setFailed(true) })
+    return () => { active = false }
+  }, [token])
+  return <main className="main-content">
+    <section className="invoice-panel panel">
+      {failed ? <p role="alert">Comprobante no disponible.</p> : !receipt ? <p>Cargando comprobante…</p> : <>
+        <h1>{receipt.tienda}</h1><h2>Comprobante de venta</h2>
+        <p>{new Date(receipt.fecha).toLocaleString('es-CO', { timeZone: 'America/Bogota' })} · {receipt.metodo}</p>
+        {receipt.estado === 'anulada' && <p role="status">Anulada</p>}
+        <ul>{receipt.lineas.map((line) => <li key={line.productoId}>
+          {line.nombre} · {line.cantidad} {line.unidad} · {money(line.subtotal)}
+        </li>)}</ul>
+        <p><strong>Total {money(receipt.total)}</strong></p>
+        {receipt.cambio !== null && <p>Cambio {money(receipt.cambio)}</p>}
+        <button className="button button-secondary" onClick={() => window.print()}>Imprimir</button>
+      </>}
+    </section>
+  </main>
+}
+
 function App() {
+  const [hash, setHash] = useState(window.location.hash)
+  useEffect(() => {
+    const changed = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', changed)
+    return () => window.removeEventListener('hashchange', changed)
+  }, [])
+  const token = linkToken(hash)
+  return hash.startsWith('#comprobante/') ? <PublicReceipt token={token ?? ''} /> : <PointOfSale />
+}
+
+function PointOfSale() {
+  const [page, setPage] = useState('Ventas')
+  const [history, setHistory] = useState(false)
+  const [preferences, setPreferences] = useState(readPreferences)
+  const [method, setMethod] = useState<BackendInvoice['metodo']>(preferences.method)
+  const [received, setReceived] = useState('')
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [customerOpen, setCustomerOpen] = useState(false)
+  const [help, setHelp] = useState(false)
+  const [actions, setActions] = useState(false)
+  const [lowOnly, setLowOnly] = useState(preferences.lowOnly)
+  const [bestSelling, setBestSelling] = useState(false)
+  const [ranking, setRanking] = useState<Record<string, number>>({})
+  const [operator, setOperator] = useState<OperatorSettings>()
+  const searchInput = useRef<HTMLInputElement>(null)
+  const navigate = (next: string) => { if (!saving) { setPage(next); setHistory(false) } }
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
+  const [catalogError, setCatalogError] = useState('')
   const [activeCategory, setActiveCategory] = useState<Category>('Todos')
   const [search, setSearch] = useState('')
-  const [cart, setCart] = useState<CartItem[]>([products[0], products[2]].map((product, index) => ({ ...product, quantity: index + 1 })))
-  const [invoiceNumber, setInvoiceNumber] = useState('FAC-2026-0018')
+  const [cart, setCart] = useState<CartItem[]>([])
   const [generatedInvoice, setGeneratedInvoice] = useState<Invoice | null>(null)
+  const [generatedUrl, setGeneratedUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const requestKey = useRef<{ fingerprint: string; key: string }>()
   const [readerOpen, setReaderOpen] = useState(false)
   const [qrModalOpen, setQrModalOpen] = useState(false)
   const [scanError, setScanError] = useState('')
@@ -178,86 +234,117 @@ function App() {
   const [capacityError, setCapacityError] = useState('')
   const qrCanvasRef = useRef<HTMLCanvasElement>(null)
 
-  const filteredProducts = useMemo(() => products.filter((product) => {
+  const refreshProducts = useCallback(() => {
+    getProducts().then((items) => {
+      setCatalogProducts(items.filter((item) => item.activo).map(mapBackendProduct))
+      setCatalogError('')
+    }).catch(() => setCatalogError('No se pudo cargar el catálogo. Comprueba el backend e intenta de nuevo.'))
+    const start = new Date(); start.setDate(start.getDate() - 30)
+    getReport({ desde: start.toISOString().slice(0, 10), hasta: today() }).then(report =>
+      setRanking(Object.fromEntries(report.productos.map(p => [p.productoId, p.cantidad])))).catch(() => undefined)
+  }, [])
+
+  useEffect(refreshProducts, [refreshProducts])
+  useEffect(() => {
+    getSettings().then(setOperator).catch(() => undefined)
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault(); searchInput.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [])
+  const showReceipt = (receipt: BackendReceipt, token: string) => {
+    setCopied(false)
+    setGeneratedInvoice(displayReceipt(receipt)); setGeneratedUrl(receiptUrl(token)); setQrModalOpen(true)
+  }
+  const categories = ['Todos', ...new Set(catalogProducts.map((product) => product.category))]
+  const filteredProducts = useMemo(() => catalogProducts.filter((product) => {
     const matchesCategory = activeCategory === 'Todos' || product.category === activeCategory
     const query = search.trim().toLowerCase()
-    return matchesCategory && (!query || `${product.name} ${product.id}`.toLowerCase().includes(query))
-  }), [activeCategory, search])
+    return matchesCategory && (!lowOnly || product.lowStock) && (!query || `${product.name} ${product.id}`.toLowerCase().includes(query))
+  }).sort((a,b) => bestSelling ? (ranking[b.id] ?? 0) - (ranking[a.id] ?? 0) : a.name.localeCompare(b.name, 'es')),
+  [activeCategory, search, catalogProducts, lowOnly, bestSelling, ranking])
 
-  const subtotal = cart.reduce((total, item) => total + item.price * item.quantity, 0)
-  const tax = Math.round(subtotal * 0.19)
-  const total = subtotal + tax
-  const itemCount = cart.reduce((count, item) => count + item.quantity, 0)
-  const qrBytes = getInvoicePayloadBytes(cart, invoiceNumber)
-  const qrUsage = Math.min((qrBytes / QR_SAFE_LIMIT_BYTES) * 100, 100)
-
-  const rejectIfQrIsTooLarge = (nextCart: CartItem[]) => {
-    const nextBytes = getInvoicePayloadBytes(nextCart, invoiceNumber)
-    if (nextBytes > QR_SAFE_LIMIT_BYTES) {
-      setCapacityError(`La factura ocuparía ${formatBytes(nextBytes)} bytes y el límite seguro es ${formatBytes(QR_SAFE_LIMIT_BYTES)} bytes. Reduce productos o cantidades.`)
-      return true
-    }
-    setCapacityError('')
-    return false
-  }
-
-  const addToCart = (product: Product) => {
-    const existing = cart.find((item) => item.id === product.id)
-    const nextCart = existing
-      ? cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-      : [...cart, { ...product, quantity: 1 }]
-    if (!rejectIfQrIsTooLarge(nextCart)) setCart(nextCart)
-  }
+  const total = cart.reduce((sum, item) => sum + lineTotal(item), 0)
+  const itemCount = cart.length
 
   const updateQuantity = (id: string, delta: number) => {
-    const nextCart = cart.flatMap((item) => {
-      if (item.id !== id) return [item]
-      const quantity = item.quantity + delta
-      return quantity > 0 ? [{ ...item, quantity }] : []
-    })
-    if (!rejectIfQrIsTooLarge(nextCart)) setCart(nextCart)
-  }
-
-  const openQrModal = () => {
-    if (!cart.length) return
-    const invoice = createInvoice(cart, invoiceNumber)
-    const payloadBytes = new TextEncoder().encode(JSON.stringify(invoice)).length
-    if (payloadBytes > QR_SAFE_LIMIT_BYTES) {
-      setCapacityError(`No se puede generar el QR: la factura ocupa ${formatBytes(payloadBytes)} bytes y supera el límite seguro.`)
+    if (saving) return
+    const product = catalogProducts.find((candidate) => candidate.id === id)
+    if (!product) return
+    const current = cart.find((item) => item.id === id)?.quantity ?? 0
+    const quantity = Math.round((current + delta * (product.fractionable ? 0.125 : 1)) * 1000) / 1000
+    if (quantity > product.stock) {
+      setCapacityError(`Stock insuficiente para ${product.name}.`)
       return
     }
-    setGeneratedInvoice(invoice)
-    setQrModalOpen(true)
+    const remaining = cart.filter((item) => item.id !== id)
+    setCart(quantity > 0 ? [...remaining, { ...product, quantity }] : remaining)
+    setCapacityError('')
   }
 
-  const handleScan = useCallback((rawValue: string) => {
+  const openQrModal = async () => {
+    if (!cart.length || saving) return
+    const lineas = cart.map(({ id, quantity }) => ({ productoId: id, cantidad: quantity }))
+    if (method === 'fiado' && !customer) { setCapacityError('Selecciona un cliente autorizado.'); return }
+    const body: BackendInvoice = { lineas, metodo: method,
+      ...(method === 'efectivo' && received !== '' ? { recibido: +received } : {}),
+      ...(method === 'fiado' && customer ? { clienteId: customer.id } : {}) }
+    const fingerprint = JSON.stringify(body)
+    if (requestKey.current?.fingerprint !== fingerprint) {
+      requestKey.current = { fingerprint, key: crypto.randomUUID() }
+    }
+    setSaving(true)
+    setCapacityError('')
     try {
-      const parsed = JSON.parse(rawValue) as Invoice
-      if (!parsed.invoiceNumber || !Array.isArray(parsed.items) || !parsed.totals?.total) throw new Error('El código no contiene una factura válida.')
+      const { comprobante, token } = await createBackendInvoice(
+        body, requestKey.current.key,
+      )
+      setGeneratedInvoice(displayReceipt(comprobante))
+      setGeneratedUrl(receiptUrl(token))
+      setCart([])
+      setReceived('')
+      requestKey.current = undefined
+      setQrModalOpen(true)
+      refreshProducts()
+    } catch (error) {
+      setCapacityError(error instanceof Error ? error.message : 'No se pudo guardar la factura.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleScan = useCallback(async (rawValue: string) => {
+    try {
+      const token = linkToken(rawValue)
+      const parsed = token ? displayReceipt(await readReceipt(token)) : JSON.parse(rawValue) as Invoice
+      if (!parsed.invoiceNumber || !Array.isArray(parsed.items) || typeof parsed.totals?.total !== 'number') {
+        throw new Error('El código no contiene una factura válida.')
+      }
       setScanSuccess(parsed)
       setScanError('')
     } catch (error) {
       setScanSuccess(null)
-      setScanError(error instanceof Error ? error.message : 'No se pudo leer el JSON de la factura.')
+      setScanError(error instanceof Error ? error.message : 'No se pudo leer la factura.')
     }
   }, [])
 
   const loadScannedInvoice = () => {
-    if (!scanSuccess) return
-    const newCart: CartItem[] = scanSuccess.items.map((item) => {
-      const product = products.find((candidate) => candidate.id === item.productId) ?? {
-        id: item.productId,
-        name: item.name,
-        category: 'Abarrotes' as const,
-        price: item.unitPrice,
-        stock: 99,
-        color: 'blue',
-        icon: '📦',
+    if (!scanSuccess || saving) return
+    const imported = new Map<string, CartItem>()
+    for (const line of scanSuccess.items) {
+      const product = catalogProducts.find((candidate) => candidate.id === line.productId)
+      const quantity = (imported.get(line.productId)?.quantity ?? 0) + line.quantity
+      if (!product || !Number.isFinite(quantity) || line.quantity <= 0 || quantity > product.stock
+          || (!product.fractionable && !Number.isInteger(quantity))) {
+        setScanError('La factura contiene productos no disponibles o cantidades inválidas.')
+        return
       }
-      return { ...product, price: item.unitPrice, quantity: item.quantity }
-    })
-    setCart(newCart)
-    setInvoiceNumber(scanSuccess.invoiceNumber)
+      imported.set(product.id, { ...product, quantity })
+    }
+    setCart([...imported.values()])
     setCapacityError('')
     setReaderOpen(false)
     setScanSuccess(null)
@@ -265,7 +352,8 @@ function App() {
 
   const copyJson = async () => {
     if (!generatedInvoice) return
-    await navigator.clipboard.writeText(JSON.stringify(generatedInvoice, null, 2))
+    try { await navigator.clipboard.writeText(generatedUrl) }
+    catch { setCapacityError('No se pudo copiar el enlace. Abre el comprobante para consultar su dirección.'); return }
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1800)
   }
@@ -295,62 +383,88 @@ function App() {
 
         <nav className="main-nav" aria-label="Navegación principal">
           <p className="nav-label">Menú principal</p>
-          <button className="nav-item active"><LayoutDashboard size={18} /> Resumen <span className="nav-pill">01</span></button>
-          <button className="nav-item"><ShoppingCart size={18} /> Ventas <span className="nav-pill nav-pill-highlight">{itemCount}</span></button>
-          <button className="nav-item"><Package size={18} /> Productos</button>
-          <button className="nav-item"><BarChart3 size={18} /> Reportes</button>
+          <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>
+          <button className={page === 'Ventas' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Ventas')}><ShoppingCart size={18} /> Ventas</button>
+          <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>
+          <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>
           <p className="nav-label nav-label-spaced">Administración</p>
-          <button className="nav-item"><Archive size={18} /> Inventario</button>
-          <button className="nav-item"><Settings size={18} /> Configuración</button>
+          <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>
+          <button className={page === 'Configuración' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Configuración')}><Settings size={18} /> Configuración</button>
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div>
-          <div className="user-profile"><div className="user-avatar">JR</div><div><strong>Juliana Rojas</strong><span>Administradora</span></div><MoreDots /></div>
+          <div className="help-card" role="button" tabIndex={0} onClick={() => setHelp(true)} onKeyDown={e => { if (e.key === 'Enter') setHelp(true) }}><div className="help-icon"><CircleHelp size={17} /></div><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div>
+          <div className="user-profile"><div className="user-avatar">C1</div><div><strong>{operator?.operador ?? 'Caja 01'}</strong><span>{operator?.rol ?? 'Operador'}</span></div><button className="profile-settings" aria-label="Configuración del operador" onClick={() => navigate('Configuración')}><MoreDots /></button></div>
           <p className="license-note">Software libre bajo GPLv3 · Sin garantía</p>
         </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
-          <div className="breadcrumb"><span>Ventas</span><ChevronDown size={14} /><strong>Nueva factura</strong></div>
-          <div className="topbar-actions"><div className="live-status"><span></span> Operación local</div><button className="icon-button"><Bell size={19} /><i></i></button><div className="topbar-date">Martes, 10 nov 2026</div></div>
+          <div className="breadcrumb"><span>{page}</span><ChevronDown size={14} /><strong>{page === 'Ventas' ? history ? 'Historial' : 'Nueva factura' : 'Tienda El Veleñito'}</strong></div>
+          <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div><button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
         </header>
 
         <div className="page-heading">
+          {page !== 'Ventas' ? <div><h1>{page}</h1><p className="heading-copy">Tienda El Veleñito · Caja 01</p></div> : <>
           <div><p className="eyebrow">Punto de venta <span></span> Caja 01</p><h1>Nueva factura</h1><p className="heading-copy">Crea una venta, genera su QR y mantén todo bajo control.</p></div>
-          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer factura QR</button><button className="button button-primary" onClick={() => { setCart([]); setCapacityError('') }}><FilePlus2 size={17} /> Nueva venta</button></div>
+          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer factura QR</button><button className="button button-secondary" onClick={() => setHistory(current => !current)}>{history ? 'Volver a venta' : 'Historial'}</button><button disabled={saving} className="button button-primary" onClick={() => { setCart([]); setReceived(''); setCustomer(null); setCapacityError(''); setHistory(false) }}><FilePlus2 size={17} /> Nueva venta</button></div>
+          </>}
         </div>
 
+        {page === 'Ventas' && !history && <>
         <section className="metric-row" aria-label="Resumen del negocio">
-          <MetricCard icon={<ShoppingBag size={18} />} label="Ventas de hoy" value="$ 2.480.000" delta="+12,8%" positive color="blue" />
-          <MetricCard icon={<Boxes size={18} />} label="Productos activos" value="24" delta="2 por reponer" color="gold" />
-          <MetricCard icon={<BarChart3 size={18} />} label="Ticket promedio" value="$ 86.900" delta="+4,2%" positive color="purple" />
+          <MetricCard icon={<Boxes size={18} />} label="Productos activos" value={String(catalogProducts.length)} delta={`${catalogProducts.filter((p) => p.lowStock).length} por reponer`} color="gold" />
         </section>
 
         <div className="workspace-grid">
           <section className="catalog-panel panel">
-            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>Selecciona un producto para añadirlo a la factura.</p></div><button className="text-button">Ver catálogo <ArrowRight size={15} /></button></div>
-            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>⌘ K</kbd></label><button className="filter-button"><span className="filter-dot"></span> Más vendidos</button></div>
-            <div className="category-tabs">{categories.map((category) => <button key={category.label} className={activeCategory === category.label ? 'category-tab active' : 'category-tab'} onClick={() => setActiveCategory(category.label)}>{category.label}<span>{category.count}</span></button>)}</div>
-            <div className="product-grid">{filteredProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={addToCart} />)}</div>
-            {!filteredProducts.length && <div className="empty-products"><Search size={25} /><strong>No encontramos productos</strong><span>Prueba con otro nombre o categoría.</span></div>}
+            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>Selecciona un producto para añadirlo a la factura.</p></div><button className="text-button" onClick={() => navigate('Productos')}>Ver catálogo <ArrowRight size={15} /></button></div>
+            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>Ctrl K</kbd></label><button className="filter-button" aria-pressed={bestSelling} onClick={() => setBestSelling(value => !value)}><span className="filter-dot"></span> {bestSelling ? 'Orden: más vendidos' : 'Más vendidos'}</button><label className="check-label"><input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} /> Stock bajo</label></div>
+            <div className="category-tabs">{categories.map((category) => <button key={category} className={activeCategory === category ? 'category-tab active' : 'category-tab'} onClick={() => setActiveCategory(category)}>{category}<span>{category === 'Todos' ? catalogProducts.length : catalogProducts.filter((p) => p.category === category).length}</span></button>)}</div>
+            <div className="product-grid">{filteredProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={(item) => updateQuantity(item.id, 1)} />)}</div>
+            {catalogError && <div className="capacity-error" role="alert">{catalogError} <button onClick={refreshProducts}>Reintentar</button></div>}
+            {!catalogError && !filteredProducts.length && <div className="empty-products"><Search size={25} /><strong>No encontramos productos</strong><span>Prueba con otro nombre o categoría.</span></div>}
           </section>
 
           <section className="invoice-panel panel">
-            <div className="invoice-heading"><div><div className="invoice-label"><span className="invoice-live-dot"></span> Factura en curso</div><h2>{invoiceNumber}</h2><p>{new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} <span>·</span> {itemCount} {itemCount === 1 ? 'artículo' : 'artículos'}</p></div><button className="more-button" aria-label="Más opciones"><MoreDots /></button></div>
-            <div className="invoice-customer"><div className="customer-icon"><UserRound size={17} /></div><div><span>Cliente</span><strong>Consumidor final</strong></div><button className="change-customer">Cambiar <ChevronDown size={14} /></button></div>
-            <div className="cart-list">{cart.length ? cart.map((item) => <CartRow key={item.id} item={item} onChange={updateQuantity} onRemove={(id) => { setCart((current) => current.filter((cartItem) => cartItem.id !== id)); setCapacityError('') }} />) : <div className="empty-cart"><ShoppingCart size={30} /><strong>Tu factura está vacía</strong><span>Selecciona productos del catálogo para comenzar.</span></div>}</div>
-            <div className="invoice-summary"><SummaryRow label="Subtotal" value={money(subtotal)} /><SummaryRow label="IVA (19%)" value={money(tax)} /><div className="total-row"><span>Total a pagar</span><strong>{money(total)}</strong></div></div>
+            <div className="invoice-heading"><div><div className="invoice-label"><span className="invoice-live-dot"></span> Factura en curso</div><h2>Venta nueva</h2><p>{new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} <span>·</span> {itemCount} {itemCount === 1 ? 'artículo' : 'artículos'}</p></div><button className="more-button" aria-label="Más opciones" onClick={() => setActions(true)}><MoreDots /></button></div>
+            <div className="invoice-customer"><div className="customer-icon"><UserRound size={17} /></div><div><span>Cliente</span><strong>{customer?.nombre ?? 'Consumidor final'}</strong></div><button disabled={saving} className="change-customer" onClick={() => setCustomerOpen(true)}>Cambiar <ChevronDown size={14} /></button></div>
+            <div className="cart-list">{cart.length ? cart.map((item) => <CartRow key={item.id} item={item} onChange={updateQuantity} onRemove={(id) => { if (saving) return; setCart((current) => current.filter((cartItem) => cartItem.id !== id)); setCapacityError('') }} />) : <div className="empty-cart"><ShoppingCart size={30} /><strong>Tu factura está vacía</strong><span>Selecciona productos del catálogo para comenzar.</span></div>}</div>
+            <div className="invoice-summary"><div className="total-row"><span>Total a pagar</span><strong>{money(total)}</strong></div></div>
             {capacityError && <div className="capacity-error" role="alert"><X size={15} /> {capacityError}</div>}
-            <div className={`qr-capacity ${qrBytes > QR_SAFE_LIMIT_BYTES * 0.85 ? 'near-limit' : ''} ${qrBytes > QR_SAFE_LIMIT_BYTES ? 'over-limit' : ''}`}><div><span><QrCode size={13} /> Capacidad segura del QR</span><strong>{formatBytes(qrBytes)} / {formatBytes(QR_SAFE_LIMIT_BYTES)} bytes</strong></div><div className="capacity-track"><span style={{ width: `${qrUsage}%` }} /></div><small>{qrBytes > QR_SAFE_LIMIT_BYTES ? 'Reduce información para poder generar el código.' : 'Se calcula con el JSON real en UTF-8.'}</small></div>
-            <button className="generate-button" disabled={!cart.length || qrBytes > QR_SAFE_LIMIT_BYTES} onClick={openQrModal}><span><QrCode size={19} /> Generar factura y QR</span><ArrowRight size={18} /></button>
-            <p className="invoice-footnote"><Clipboard size={13} /> El QR guardará la información completa en formato JSON.</p>
+            <div className="data-form payment-form">
+              <label>Medio de pago<select disabled={saving} value={method} onChange={e => setMethod(e.target.value as BackendInvoice['metodo'])}>
+                <option value="efectivo">Efectivo</option><option value="nequi">Nequi</option><option value="daviplata">Daviplata</option>
+                <option value="fiado">Fiado</option></select></label>
+              {method === 'efectivo' && <label>Efectivo recibido (vacío para exacto)<input disabled={saving} type="number" min={total}
+                step="1" value={received} onChange={e => setReceived(e.target.value)} /></label>}
+              {method === 'efectivo' && received !== '' && <p>Cambio {money(Math.max(0, +received - total))}</p>}
+              {method === 'fiado' && <p>Cliente {customer?.nombre ?? 'Selecciona un cliente con autorización.'}</p>}
+            </div>
+            <button className="generate-button" disabled={!cart.length || saving || method === 'efectivo' && received !== '' && (!Number.isInteger(+received) || +received < total) || method === 'fiado' && !customer} onClick={openQrModal}><span><QrCode size={19} /> {saving ? 'Guardando…' : 'Generar factura y QR'}</span><ArrowRight size={18} /></button>
+            <p className="invoice-footnote"><Clipboard size={13} /> El comprobante se guarda al confirmar la venta.</p>
           </section>
         </div>
+        </>}
+        {page === 'Resumen' && <OverviewPage onNavigate={navigate} />}
+        {(page === 'Productos' || page === 'Inventario') && <ProductsPage key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
+        {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
+        {page === 'Configuración' && <SettingsPage onSaved={p => { setPreferences(p); setMethod(p.method); setLowOnly(p.lowOnly) }} />}
       </main>
+      {customerOpen && <CustomerPicker onClose={() => setCustomerOpen(false)} onSelect={c => { setCustomer(c); setCustomerOpen(false); setMethod(c ? 'fiado' : preferences.method) }} />}
+      {help && <Modal title="Ayuda del punto de venta" onClose={() => setHelp(false)}>
+        <p>En Ventas, busca un producto y añádelo al carrito. Puedes indicar cantidades fraccionarias y elegir efectivo, Nequi, Daviplata o fiado.</p>
+        <p>Registra productos y sus precios en Productos. Las entradas de mercancía se guardan desde Inventario.</p>
+        <p>En Historial puedes consultar comprobantes y anular una venta del día antes del cierre. Reportes permite filtrar el período y exportar CSV o imprimir.</p>
+        <p>Para consultar un QR desde otro dispositivo, el enlace necesita una dirección pública o de la red accesible desde ese dispositivo.</p>
+      </Modal>}
+      {actions && <Modal title="Opciones de venta" onClose={() => setActions(false)}>
+        <div className="data-form"><button disabled={saving} className="button button-secondary" onClick={() => { setCart([]); setReceived(''); setActions(false) }}>Vaciar carrito</button>
+        <button className="button button-secondary" onClick={() => { setHistory(true); setActions(false) }}>Consultar historial</button></div>
+      </Modal>}
 
-      {qrModalOpen && generatedInvoice && <QrModal invoice={generatedInvoice} canvasRef={qrCanvasRef} copied={copied} onCopy={copyJson} onDownload={downloadQr} onClose={() => setQrModalOpen(false)} />}
+      {qrModalOpen && generatedInvoice && <QrModal url={generatedUrl} invoice={generatedInvoice} canvasRef={qrCanvasRef} copied={copied} onCopy={copyJson} onDownload={downloadQr} onClose={() => setQrModalOpen(false)} />}
       {readerOpen && <ReaderModal onClose={() => { setReaderOpen(false); setScanSuccess(null); setScanError('') }} onScan={handleScan} scanError={scanError} scanSuccess={scanSuccess} onLoad={loadScannedInvoice} />}
     </div>
   )
@@ -360,23 +474,63 @@ function MetricCard({ icon, label, value, delta, positive, color }: { icon: Reac
   return <div className="metric-card"><div className={`metric-icon ${color}`}>{icon}</div><div className="metric-info"><span>{label}</span><strong>{value}</strong></div><div className={positive ? 'metric-delta positive' : 'metric-delta'}>{positive && '↗ '}{delta}</div></div>
 }
 
+function mapBackendProduct(product: BackendProduct): Product {
+  return {
+    id: product.id,
+    name: product.nombre,
+    category: product.categoria,
+    price: Number(product.precioVenta),
+    stock: Number(product.stock),
+    color: 'blue',
+    icon: '📦',
+    unit: product.unidad,
+    fractionable: product.fraccionable,
+    lowStock: product.umbralMinimo != null && product.stock <= product.umbralMinimo,
+  }
+}
+
 function ProductCard({ product, onAdd }: { product: Product; onAdd: (product: Product) => void }) {
-  return <article className="product-card" onClick={() => onAdd(product)}><div className={`product-art ${product.color}`}><span>{product.icon}</span>{product.tag && <em>{product.tag}</em>}<button className="quick-add" onClick={(event) => { event.stopPropagation(); onAdd(product) }} aria-label={`Añadir ${product.name}`}><Plus size={17} /></button></div><div className="product-info"><div><span className="product-category">{product.category}</span><h3>{product.name}</h3></div><strong>{money(product.price)}</strong></div><div className="product-meta"><span>SKU {product.id}</span><span className={product.stock < 10 ? 'low-stock' : ''}><i></i>{product.stock} disponibles</span></div></article>
+  return <article className="product-card" onClick={() => onAdd(product)}><div className={`product-art ${product.color}`}><span>{product.icon}</span>{product.tag && <em>{product.tag}</em>}<button className="quick-add" onClick={(event) => { event.stopPropagation(); onAdd(product) }} aria-label={`Añadir ${product.name}`}><Plus size={17} /></button></div><div className="product-info"><div><span className="product-category">{product.category}</span><h3>{product.name}</h3></div><strong>{money(product.price)}</strong></div><div className="product-meta"><span>SKU {product.id}</span><span className={product.lowStock ? 'low-stock' : ''}><i></i>{product.stock} {product.unit} disponibles</span></div></article>
 }
 
 function CartRow({ item, onChange, onRemove }: { item: CartItem; onChange: (id: string, delta: number) => void; onRemove: (id: string) => void }) {
-  return <div className="cart-row"><div className={`cart-thumb ${item.color}`}>{item.icon}</div><div className="cart-product"><strong>{item.name}</strong><span>{money(item.price)} c/u</span></div><div className="quantity-control"><button onClick={() => onChange(item.id, -1)} aria-label="Reducir cantidad"><Minus size={13} /></button><span>{item.quantity}</span><button onClick={() => onChange(item.id, 1)} aria-label="Aumentar cantidad"><Plus size={13} /></button></div><strong className="cart-line-total">{money(item.price * item.quantity)}</strong><button className="remove-item" onClick={() => onRemove(item.id)} aria-label={`Eliminar ${item.name}`}><Trash2 size={15} /></button></div>
+  return <div className="cart-row"><div className={`cart-thumb ${item.color}`}>{item.icon}</div><div className="cart-product"><strong>{item.name}</strong><span>{money(item.price)} / {item.unit}</span></div><div className="quantity-control"><button onClick={() => onChange(item.id, -1)} aria-label="Reducir cantidad"><Minus size={13} /></button><input aria-label={`Cantidad de ${item.name}`} type="number" min={item.fractionable ? '0.001' : '1'} step={item.fractionable ? '0.001' : '1'}
+    value={item.quantity} onChange={event => {
+      const quantity = +event.target.value
+      if (Number.isFinite(quantity) && quantity > 0 && (!item.fractionable ? Number.isInteger(quantity) : Math.round(quantity * 1000) === quantity * 1000))
+        onChange(item.id, (quantity - item.quantity) / (item.fractionable ? 0.125 : 1))
+    }} /><button onClick={() => onChange(item.id, 1)} aria-label="Aumentar cantidad"><Plus size={13} /></button></div><strong className="cart-line-total">{money(lineTotal(item))}</strong><button className="remove-item" onClick={() => onRemove(item.id)} aria-label={`Eliminar ${item.name}`}><Trash2 size={15} /></button></div>
 }
-
-function SummaryRow({ label, value }: { label: string; value: string }) { return <div className="summary-row"><span>{label}</span><strong>{value}</strong></div> }
 
 function MoreDots() { return <span className="more-dots"><i></i><i></i><i></i></span> }
 
-function QrModal({ invoice, canvasRef, copied, onCopy, onDownload, onClose }: { invoice: Invoice; canvasRef: React.RefObject<HTMLCanvasElement>; copied: boolean; onCopy: () => void; onDownload: () => void; onClose: () => void }) {
+function QrModal({ url, invoice, canvasRef, copied, onCopy, onDownload, onClose }: { url: string; invoice: Invoice; canvasRef: React.RefObject<HTMLCanvasElement>; copied: boolean; onCopy: () => void; onDownload: () => void; onClose: () => void }) {
   const [fullScreen, setFullScreen] = useState(false)
-  const json = JSON.stringify(invoice)
-  const jsonBytes = new TextEncoder().encode(json).length
-  return <div className={fullScreen ? 'modal-backdrop qr-backdrop-fullscreen' : 'modal-backdrop'} role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section className={fullScreen ? 'modal qr-modal qr-modal-fullscreen' : 'modal qr-modal'} role="dialog" aria-modal="true" aria-labelledby="qr-modal-title"><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><button className="fullscreen-toggle" onClick={() => setFullScreen((current) => !current)} aria-label={fullScreen ? 'Salir de pantalla completa' : 'Poner QR en pantalla completa'}>{fullScreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{fullScreen ? 'Salir de pantalla completa' : 'QR a toda la pantalla'}</span></button><div className="modal-kicker"><span><QrCode size={15} /></span> Factura lista</div><h2 id="qr-modal-title">QR de {invoice.invoiceNumber}</h2><p className="modal-subtitle">Escanea este código para transferir la factura completa.</p><div className="qr-stage"><div className="qr-frame"><QRCodeCanvas ref={canvasRef} value={json} size={1024} level="L" minVersion={40} boostLevel={false} includeMargin /></div><div className="qr-specs"><span><i></i> Versión 40</span><span><i></i> Corrección baja (L)</span><span><i></i> {formatBytes(jsonBytes)} / {formatBytes(QR_SAFE_LIMIT_BYTES)} bytes</span></div></div><div className="qr-total"><span>Total de la factura</span><strong>{money(invoice.totals.total)}</strong></div><div className="modal-actions"><button className="button button-secondary" onClick={onCopy}>{copied ? <><Check size={17} /> Copiado</> : <><Copy size={17} /> Copiar JSON</>}</button><button className="button button-primary" onClick={onDownload}><FileDown size={17} /> Descargar QR</button></div><p className="modal-note">El archivo PNG se genera en alta resolución para mejorar la lectura. La sincronización con Spring Boot se añadirá en la siguiente fase.</p></section></div>
+  const [deviceViewOpen, setDeviceViewOpen] = useState(false)
+  return <>
+    <div className={fullScreen ? 'modal-backdrop qr-backdrop-fullscreen' : 'modal-backdrop'} style={deviceViewOpen ? { visibility: 'hidden' } : undefined} aria-hidden={deviceViewOpen || undefined} role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
+      <section className={fullScreen ? 'modal qr-modal qr-modal-fullscreen' : 'modal qr-modal'} role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
+        <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button>
+        <button className="fullscreen-toggle" onClick={() => setFullScreen((current) => !current)} aria-label={fullScreen ? 'Salir de pantalla completa' : 'Poner QR en pantalla completa'}>{fullScreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{fullScreen ? 'Salir de pantalla completa' : 'QR a toda la pantalla'}</span></button>
+        <div className="modal-kicker"><span><QrCode size={15} /></span> Factura lista</div>
+        <h2 id="qr-modal-title">QR de {invoice.invoiceNumber}</h2>
+        <p className="modal-subtitle">Escanea este código para abrir el comprobante.</p>
+        <div className="qr-stage"><div className="qr-frame"><QRCodeCanvas ref={canvasRef} value={url} size={1024} level="H" boostLevel={false} includeMargin /></div><div className="qr-specs"><span><i></i> Versión automática</span><span><i></i> Corrección alta (H)</span></div></div>
+        <div className="qr-total"><span>Total de la factura</span><strong>{money(invoice.totals.total)}</strong></div>
+        <div className="modal-actions"><button className="button button-secondary" onClick={onCopy}>{copied ? <><Check size={17} /> Copiado</> : <><Copy size={17} /> Copiar enlace</>}</button><button className="button button-primary" onClick={onDownload}><FileDown size={17} /> Descargar QR</button></div>
+        <a className="button button-secondary receipt-link" href={url} target="_blank" rel="noreferrer">Abrir comprobante</a>
+        <button className="button device-preview-button" onClick={() => setDeviceViewOpen(true)}><Monitor size={17} /> Ver en dispositivo 3D</button>
+        <p className="modal-note">El enlace estará disponible por 30 días.</p>
+      </section>
+    </div>
+    {deviceViewOpen && <DeviceQrView url={url} invoice={invoice} onClose={() => setDeviceViewOpen(false)} />}
+  </>
+}
+
+function DeviceQrView({ url, invoice, onClose }: { url: string; invoice: Invoice; onClose: () => void }) {
+  return <Suspense fallback={<div className="device-view-backdrop"><div className="device-loading" role="status">Preparando el dispositivo 3D… <button className="button button-secondary" onClick={onClose}>Volver</button></div></div>}>
+    <DeviceViewer json={url} invoiceNumber={invoice.invoiceNumber} total={money(invoice.totals.total)} onClose={onClose} />
+  </Suspense>
 }
 
 function ReaderModal({ onClose, onScan, scanError, scanSuccess, onLoad }: { onClose: () => void; onScan: (value: string) => void; scanError: string; scanSuccess: Invoice | null; onLoad: () => void }) {
@@ -424,7 +578,7 @@ function ReaderModal({ onClose, onScan, scanError, scanSuccess, onLoad }: { onCl
 
   const submitManual = (event: FormEvent) => { event.preventDefault(); if (manualJson.trim()) onScan(manualJson.trim()) }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section className="modal reader-modal" role="dialog" aria-modal="true" aria-labelledby="reader-modal-title"><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="modal-kicker reader-kicker"><span><Camera size={15} /></span> Importar venta</div><h2 id="reader-modal-title">Leer factura QR</h2><p className="modal-subtitle">Escanea con la cámara o carga una imagen del código de factura.</p><div className="reader-layout"><div className="scanner-column"><div className="scanner-shell"><div id="qr-reader"></div><div id="qr-file-reader" className="file-scanner"></div>{cameraError && <div className="scanner-message"><Camera size={22} /><span>{cameraError}</span></div>}</div><label className="upload-button"><Upload size={16} /> Subir imagen QR<input type="file" accept="image/*" onChange={handleFile} /></label></div><div className="reader-divider"><span>o</span></div><form className="manual-column" onSubmit={submitManual}><label htmlFor="manual-json">Pegar JSON de factura</label><textarea id="manual-json" value={manualJson} onChange={(event) => setManualJson(event.target.value)} placeholder={'{\n  "invoiceNumber": "FAC-..."\n}'}></textarea><button className="button button-secondary" type="submit"><Clipboard size={16} /> Validar JSON</button></form></div>{scanError && <div className="scan-feedback error"><X size={16} /> {scanError}</div>}{scanSuccess && <div className="scan-feedback success"><div className="success-icon"><Check size={16} /></div><div><strong>Factura {scanSuccess.invoiceNumber} encontrada</strong><span>{scanSuccess.items.length} productos · Total {money(scanSuccess.totals.total)}</span></div><button className="button button-primary" onClick={onLoad}>Cargar factura</button></div>}<p className="modal-note">La factura leída reemplazará los productos de la venta actual.</p></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section className="modal reader-modal" role="dialog" aria-modal="true" aria-labelledby="reader-modal-title"><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="modal-kicker reader-kicker"><span><Camera size={15} /></span> Importar venta</div><h2 id="reader-modal-title">Leer factura QR</h2><p className="modal-subtitle">Escanea con la cámara o carga una imagen del código de factura.</p><div className="reader-layout"><div className="scanner-column"><div className="scanner-shell"><div id="qr-reader"></div><div id="qr-file-reader" className="file-scanner"></div>{cameraError && <div className="scanner-message"><Camera size={22} /><span>{cameraError}</span></div>}</div><label className="upload-button"><Upload size={16} /> Subir imagen QR<input type="file" accept="image/*" onChange={handleFile} /></label></div><div className="reader-divider"><span>o</span></div><form className="manual-column" onSubmit={submitManual}><label htmlFor="manual-json">Pegar enlace o JSON de factura</label><textarea id="manual-json" value={manualJson} onChange={(event) => setManualJson(event.target.value)} placeholder={'{\n  "invoiceNumber": "FAC-..."\n}'}></textarea><button className="button button-secondary" type="submit"><Clipboard size={16} /> Consultar factura</button></form></div>{scanError && <div className="scan-feedback error"><X size={16} /> {scanError}</div>}{scanSuccess && <div className="scan-feedback success"><div className="success-icon"><Check size={16} /></div><div><strong>Factura {scanSuccess.invoiceNumber} encontrada</strong><span>{scanSuccess.items.length} productos · Total {money(scanSuccess.totals.total)}</span></div><button className="button button-primary" onClick={onLoad}>Cargar factura</button></div>}<p className="modal-note">La factura leída reemplazará los productos de la venta actual.</p></section></div>
 }
 
 export default App

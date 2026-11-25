@@ -1,0 +1,264 @@
+.device-preview-button {
+  width: 100%;
+  margin-top: 9px;
+  color: #074072;
+  border: 1px solid #dce5ee;
+  background: #f8fbfd;
+}
+
+.qr-modal:not(.qr-modal-fullscreen) { max-height: calc(100dvh - 40px); overflow: auto; }
+
+.device-preview-button:hover {
+  color: #fff;
+  border-color: #122c51;
+  background: #122c51;
+}
+
+.device-view-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  padding: 18px;
+  display: flex;
+  background: #071b34ed;
+  backdrop-filter: blur(8px);
+}
+
+.device-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #ffffff2e;
+  border-radius: 22px;
+  background: #edf4f8;
+  box-shadow: 0 26px 90px #020c1dcc;
+}
+
+.device-view-header {
+  position: relative;
+  z-index: 3;
+  min-height: 72px;
+  padding: 14px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #dbe6ee;
+  background: #ffffffdf;
+}
+
+.device-view-brand,
+.device-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-view-brand-mark {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: #122c51;
+  background: #fcc40e;
+  box-shadow: 0 6px 14px #122c5126;
+}
+
+.device-view-brand strong,
+.device-view-brand span {
+  display: block;
+}
+
+.device-view-brand strong {
+  color: #122c51;
+  font: 800 14px 'Manrope', sans-serif;
+  letter-spacing: -0.3px;
+}
+
+.device-view-brand span {
+  margin-top: 3px;
+  color: #8396a9;
+  font-size: 10px;
+}
+
+.device-view-actions .button {
+  height: 35px;
+}
+
+.device-center-button {
+  color: #fff;
+  background: #074072;
+  box-shadow: 0 6px 14px #07407226;
+}
+
+.device-center-button:hover {
+  background: #122c51;
+}
+
+.device-view-controls {
+  position: absolute;
+  z-index: 4;
+  bottom: 21px;
+  left: 24px;
+  height: 38px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #ffffffb8;
+  border-radius: 10px;
+  background: #ffffffc7;
+  box-shadow: 0 8px 20px #122c5112;
+  backdrop-filter: blur(5px);
+}
+
+.device-view-controls button {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #074072;
+  background: transparent;
+}
+
+.device-view-controls button:hover:not(:disabled) {
+  color: #fff;
+  background: #074072;
+}
+
+.device-view-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.device-view-controls span {
+  min-width: 42px;
+  color: #355875;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.device-view-controls i {
+  height: 20px;
+  margin: 0 2px;
+  border-left: 1px solid #d1dfe8;
+}
+
+.device-view-footer {
+  position: relative;
+  z-index: 3;
+  padding: 13px 22px 15px;
+  border-top: 1px solid #dbe6ee;
+  background: #ffffffeb;
+}
+
+.device-invoice-info {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.device-invoice-info div {
+  padding-right: 14px;
+  border-right: 1px solid #e6edf2;
+}
+
+.device-invoice-info div:last-child {
+  border-right: 0;
+}
+
+.device-invoice-info span,
+.device-invoice-info strong {
+  display: block;
+}
+
+.device-invoice-info span {
+  color: #8c9eae;
+  font-size: 9px;
+}
+
+.device-invoice-info strong {
+  margin-top: 4px;
+  color: #122c51;
+  font: 800 14px 'Manrope', sans-serif;
+}
+
+.device-view-footer > p {
+  margin: 12px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #8296a8;
+  font-size: 10px;
+}
+
+.device-view-footer > p svg {
+  color: #074072;
+}
+
+.device-view-footer > p strong {
+  color: #074072;
+}
+
+@media (max-width: 760px) {
+  .device-view-backdrop {
+    padding: 0;
+  }
+
+  .device-view {
+    border-radius: 0;
+  }
+
+  .device-view-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .device-view-actions {
+    width: 100%;
+  }
+
+  .device-view-actions .button {
+    flex: 1;
+  }
+
+  .device-invoice-info {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .device-view-footer > p {
+    font-size: 9px;
+  }
+}
+
+/* WebGL owns the geometry and camera; CSS only lays out the viewer. */
+.device-view-header, .device-view-footer { flex-shrink: 0; }
+.device-render-stage { position: relative; flex: 1; min-height: 320px; overflow: hidden; background: #dfe8ee; }
+.device-render-host { position: absolute; inset: 0; }
+.device-render-host canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.device-render-host canvas:active { cursor: grabbing; }
+.device-render-host canvas:focus-visible, .device-view button:focus-visible { outline: 3px solid #FCAF00; outline-offset: -3px; }
+.device-view-presets { flex-shrink: 0; display: flex; justify-content: center; gap: 4px; padding: 5px; border-bottom: 1px solid #dbe6ee; background: #f7fafc; }
+.device-view-presets button { padding: 9px 12px; border-radius: 8px; background: transparent; color: #122C51; font-size: 11px; font-weight: 700; }
+.device-view-presets button:hover { background: #074072; color: white; }
+.device-view button:disabled { cursor: not-allowed; opacity: .45; }
+.device-texture-source { position: absolute; width: 1px; height: 1px; overflow: hidden; visibility: hidden; pointer-events: none; }
+.device-render-fallback { position: absolute; inset: 0; overflow: auto; padding: 20px; display: grid; place-items: center; align-content: center; gap: 12px; background: #edf4f8; }
+.device-render-fallback p { max-width: 440px; text-align: center; font-size: 13px; }
+.device-render-fallback canvas { width: min(80%, 400px) !important; height: auto !important; }
+.device-loading { margin: auto; padding: 32px; display: grid; gap: 20px; border-radius: 14px; background: white; }
+.device-view-footer > p { display: block; text-align: center; line-height: 1.8; }
+@media (max-width: 760px) {
+  .device-view-presets button { padding: 9px; }
+  .device-view-controls { left: 12px; bottom: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-view button { transition: none; }
+}
