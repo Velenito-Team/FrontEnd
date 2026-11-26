@@ -2,10 +2,19 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Modal from '../components/Modal'
 import { createFixedExpense, getMonthlyAccounting, type FixedExpense, type MonthlyAccounting } from '../services/api'
 import { money, today } from './SalesPage'
+import DailyAccountingView from './DailyAccountingView'
 
 export default function AccountingPage() {
   const [period, setPeriod] = useState(() => today().slice(0, 7))
+  const [view, setView] = useState<'monthly' | 'daily'>('monthly')
   return <section className="panel management-panel">
+    <div className="accounting-views" role="group" aria-label="Vistas de contabilidad">
+      <button className={`button ${view === 'monthly' ? 'button-primary' : 'button-secondary'}`}
+        aria-pressed={view === 'monthly'} onClick={() => setView('monthly')}>Gastos del mes</button>
+      <button className={`button ${view === 'daily' ? 'button-primary' : 'button-secondary'}`}
+        aria-pressed={view === 'daily'} onClick={() => setView('daily')}>Balance diario</button>
+    </div>
+    {view === 'daily' ? <DailyAccountingView /> : <>
     <div className="panel-heading"><h2>Gastos fijos mensuales</h2></div>
     <div className="filters">
       <label>Mes del balance<input type="month" value={period} onChange={event => setPeriod(event.target.value)} /></label>
@@ -13,6 +22,7 @@ export default function AccountingPage() {
     {/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(period)
       ? <MonthlyExpenses key={period} period={period} />
       : <p>Selecciona un mes para consultar los gastos fijos.</p>}
+    </>}
   </section>
 }
 

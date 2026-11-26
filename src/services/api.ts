@@ -68,11 +68,23 @@ export type MonthlyAccounting = {
   gastosFijos: FixedExpense[]
   balance?: { resultadoOperativo: number; gastosFijos: number; resultadoNeto: number }
 }
+export type DailyAccounting =
+  | { estadoCaja: 'abierta' | 'sin_cierre' }
+  | {
+      estadoCaja: 'cerrada'
+      cobrosVentas: number
+      abonosRecibidos: number
+      egresosMercancia: number
+      otrosEgresosOperativos: number
+      diferenciaArqueo: number
+    }
 const json = (value: unknown): RequestInit => ({
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
 })
 export const getMonthlyAccounting = (period: string) =>
   request<MonthlyAccounting>(`/api/accounting/monthly?periodo=${encodeURIComponent(period)}`)
+export const getDailyAccounting = (date: string) =>
+  request<DailyAccounting>(`/api/accounting/daily?fecha=${encodeURIComponent(date)}`)
 
 export function createFixedExpense(expense: FixedExpenseInput, key: string) {
   const init = json(expense)

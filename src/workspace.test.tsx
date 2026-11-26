@@ -9,7 +9,7 @@ import * as api from './services/api'
 vi.mock('./services/api', () => ({
   getProducts: vi.fn(), getSettings: vi.fn(), getReport: vi.fn(), getSales: vi.fn(),
   getCustomers: vi.fn(), getCustomerCredits: vi.fn(), registerCreditPayment: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
-  getMonthlyAccounting: vi.fn(), createFixedExpense: vi.fn(),
+  getMonthlyAccounting: vi.fn(), getDailyAccounting: vi.fn(), createFixedExpense: vi.fn(),
   deactivateProduct: vi.fn(), receiveStock: vi.fn(), createInvoice: vi.fn(),
   readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
 }))
@@ -332,4 +332,29 @@ it('registra un gasto fijo en el mes elegido y actualiza el resumen contable', a
   fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
   expect(await screen.findByText('Ya hay un gasto con este concepto en el mes seleccionado.')).toBeTruthy()
   expect(api.createFixedExpense).toHaveBeenCalledTimes(1)
+})
+
+it('exige el cierre y muestra el flujo operativo diario con el arqueo aparte', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  vi.mocked(api.getMonthlyAccounting).mockResolvedValue({ gastosFijos: [] })
+  const daily = vi.mocked(api.getDailyAccounting)
+  daily.mockResolvedValueOnce({ estadoCaja: 'abierta' })
+  daily.mockResolvedValue({
+    estadoCaja: 'cerrada', cobrosVentas: 100000, abonosRecibidos: 20000, egresosMercancia: 30000,
+    otrosEgresosOperativos: 5000, diferenciaArqueo: -2000,
+  })
+
+  render(<App />)
+  enterDemo()
+  fireEvent.click(await screen.findByRole('button', { name: 'Contabilidad' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Balance diario' }))
+  expect(await screen.findByText(/primero debes cerrar la caja/)).toBeTruthy()
+  expect(screen.queryByText(/Flujo operativo neto/)).toBeNull()
+  fireEvent.change(screen.getByLabelText('Fecha del balance'), { target: { value: '2026-10-01' } })
+
+  const money = (amount: number) => amount.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+  expect(await screen.findByText(/Flujo operativo neto del día/)).toHaveProperty('textContent',
+    `Flujo operativo neto del día · ${money(85000)}`)
+  expect(screen.getByRole('region', { name: 'Arqueo físico' }).textContent).toContain(money(-2000))
+  expect(daily).toHaveBeenLastCalledWith('2026-10-01')
 })
