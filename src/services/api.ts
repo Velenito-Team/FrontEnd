@@ -58,6 +58,10 @@ export type Report = {
 }
 export type Settings = { tienda: string; caja: string; operador: string; usuario: string; rol: string; replicaSet: string; primario: boolean }
 export type Customer = { id: string; nombre: string; telefono?: string; saldo: number }
+export type CustomerCredit = {
+  id: string; fecha: string; total: number; saldo: number; estado: string
+  lineas: BackendReceipt['lineas']
+}
 const json = (value: unknown): RequestInit => ({
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
 })
@@ -83,6 +87,8 @@ export const getSettings = () => request<Settings>('/api/settings')
 export const reopenReceipt = (id: string) => request<{ comprobante: BackendReceipt; token: string }>(`/api/sales/${id}/receipt`, { method: 'POST' })
 export const cancelSale = (id: string, motivo: string) => request<BackendReceipt>(`/api/sales/${id}/cancel`, json({ motivo }))
 export const getCustomers = () => request<Customer[]>('/api/customers')
+export const getCustomerCredits = (customerId: string) =>
+  request<CustomerCredit[]>(`/api/customers/${encodeURIComponent(customerId)}/credits`)
 export const createCustomer = (customer: { nombre: string; telefono: string; autorizacion: boolean; evidencia: string }) =>
   request<Customer>('/api/customers', json(customer))
 

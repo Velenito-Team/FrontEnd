@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createCustomer, getCustomers, type Customer } from '../services/api'
 import Modal from './Modal'
 
-export default function CustomerPicker({ onSelect, onClose }: { onSelect: (customer: Customer | null) => void; onClose: () => void }) {
+export default function CustomerPicker({ onSelect, onClose, registrationOnly = false }: { onSelect: (customer: Customer | null) => void; onClose: () => void; registrationOnly?: boolean }) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -10,10 +10,10 @@ export default function CustomerPicker({ onSelect, onClose }: { onSelect: (custo
   const [authorized, setAuthorized] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { getCustomers().then(setCustomers).catch(e => setError(e.message)) }, [])
-  return <Modal title="Seleccionar cliente" onClose={() => { if (!busy) onClose() }}>
-    <button className="button button-secondary" onClick={() => onSelect(null)}>Consumidor final</button>
-    <div className="customer-options">{customers.map(c => <button key={c.id} onClick={() => onSelect(c)}>{c.nombre} · saldo {c.saldo.toLocaleString('es-CO')}</button>)}</div>
+  useEffect(() => { if (!registrationOnly) getCustomers().then(setCustomers).catch(e => setError(e.message)) }, [registrationOnly])
+  return <Modal title={registrationOnly ? 'Registrar cliente fiado' : 'Seleccionar cliente'} onClose={() => { if (!busy) onClose() }}>
+    {!registrationOnly && <><button className="button button-secondary" onClick={() => onSelect(null)}>Consumidor final</button>
+    <div className="customer-options">{customers.map(c => <button key={c.id} onClick={() => onSelect(c)}>{c.nombre} · saldo {c.saldo.toLocaleString('es-CO')}</button>)}</div></>}
     <form className="data-form" onSubmit={async e => {
       e.preventDefault(); setBusy(true)
       try { const customer = await createCustomer({ nombre: name, telefono: phone, evidencia: evidence, autorizacion: authorized }); onSelect(customer) }
@@ -25,7 +25,7 @@ export default function CustomerPicker({ onSelect, onClose }: { onSelect: (custo
       <label>Referencia de la constancia<input required value={evidence} onChange={e => setEvidence(e.target.value)} /></label>
       <label className="check-label"><input type="checkbox" required checked={authorized} onChange={e => setAuthorized(e.target.checked)} /> El cliente otorgó autorización previa e informada</label>
       {error && <p className="notice error" role="alert">{error}</p>}
-      <button className="button button-primary" disabled={busy}>Guardar y seleccionar cliente</button>
+      <button className="button button-primary" disabled={busy}>{registrationOnly ? 'Guardar cliente' : 'Guardar y seleccionar cliente'}</button>
     </form>
   </Modal>
 }
