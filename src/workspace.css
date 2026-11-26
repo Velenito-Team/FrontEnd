@@ -133,7 +133,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 body { background: #f7f5ed; color: #18384a; font-family: var(--store-font); }
 .sidebar { background: #153e4b; border-top: 7px solid #eeb942; }
 .brand-mark { background: #f6c448; color: #163e4a; border-radius: 9px; }
-.brand-name, .page-heading h1, .panel h2, .access-card h1 {
+.brand-name, .page-heading h1, .panel h2 {
   font-family: var(--store-font); letter-spacing: -.035em;
 }
 .page-heading h1 { color: #17414b; font-size: clamp(32px,4vw,48px); }
@@ -141,13 +141,6 @@ body { background: #f7f5ed; color: #18384a; font-family: var(--store-font); }
 .panel { border: 1px solid #d3d8cd; border-radius: 12px; box-shadow: 0 2px 0 #d3d8cd66; }
 .button-primary, .generate-button { background: #f5c247; color: #193b44; box-shadow: none; }
 .brand-lockup { margin-bottom: 24px; }
-.access-screen { min-height: 100dvh; display: grid; place-items: center; padding: 20px; background: #eaece1; }
-.access-card { position: relative; overflow: hidden; background: #fffdf6; border: 1px solid #bdc7bb; border-radius: 14px; width: min(100%,450px); padding: 54px 32px 32px; color: #173e48; }
-.awning { position: absolute; inset: 0 0 auto; height: 20px; background: repeating-linear-gradient(90deg,#17434c 0 28px,#efc24c 28px 56px); }
-.access-card h1 { font-size: 48px; margin: 8px 0 32px; }
-.access-card h2 { font-size: 23px; margin: 0; }
-.access-card p { line-height: 1.6; }
-.access-card button { width: 100%; margin-top: 12px; }
 .credit-search { display: grid; gap: 8px; max-width: 26rem; margin: 20px 0; }
 .credit-search input { border: 1px solid #b2c1bc; border-radius: 7px; padding: 8px 12px; }
 .credit-row { padding: 14px 0; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; border-top: 1px solid #d3d8cd; }
@@ -164,9 +157,9 @@ kbd, select, option, textarea, input, button { font-family: var(--store-font); }
 .nav-item.active { background: #ffffff0c; color: #ffe095; box-shadow: inset 3px 0 #f5c247; }
 .nav-item.active svg { color: inherit; }
 .help-card, .help-icon, .brand-mark { border: 0; background: transparent; box-shadow: none; color: #ffda76; }
-.panel, .management-panel, .access-card { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.panel, .management-panel { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
 .page-heading { align-items: flex-start; flex-wrap: wrap; }
-.page-heading h1, .panel h2, .access-card h1 { font-weight: 700; }
+.page-heading h1, .panel h2 { font-weight: 700; }
 .heading-actions, .category-tabs, .panel-heading, .topbar, .topbar-actions, .invoice-customer { flex-wrap: wrap; }
 .topbar { height: auto; min-height: 62px; gap: 8px; padding-block: 8px; }
 .button, .nav-item, .generate-button, .category-tab, .filter-button { height: auto; padding-block: 9px; white-space: normal; }
@@ -188,9 +181,6 @@ button svg { flex-shrink: 0; }
 .line-stock.low-stock { color: #885114; }
 .cart-line-total { width: auto; }
 .payment-form { padding-inline: 0; }
-.access-screen { background: var(--paper); }
-.access-card { border-block: 1px solid var(--rule); padding-inline: 6px; }
-.awning { height: 7px; }
 .check-label { width: fit-content; }
 .filters input[type=checkbox], .data-form input[type=checkbox] { width: 18px; flex: 0 0 18px; }
 .form-grid > *, .filters > *, .data-form > *, .credit-row > *, .settings-details dd { min-width: 0; max-width: 100%; }
@@ -216,3 +206,24 @@ fieldset, .catalog-toolbar .search-box { min-width: 0; }
   .modal { min-width: 0; }
   .report-breakdown { grid-template-columns: minmax(0,1fr); }
 }
+
+/* La cabecera del acceso comparte la tinta y el amarillo de la caja. */
+.login-screen { min-height: 100dvh; background: var(--paper); color: var(--ink); }
+.login-masthead {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  gap: 10px 24px; padding: 18px clamp(20px, 5vw, 72px);
+  border-top: 5px solid #f5c247; background: #153e4b; color: #fffef9;
+}
+.login-brand { display: flex; align-items: center; gap: 12px; font-size: 1.45rem; font-weight: 700; }
+.login-brand svg { color: #ffda76; }
+.login-body { width: min(26rem, calc(100% - 40px)); margin: clamp(44px, 11vh, 120px) auto 0; padding-bottom: 40px; }
+.login-body h1 { margin: 0; font-size: clamp(2.2rem, 5vw, 3rem); line-height: 1.1; letter-spacing: -.035em; }
+.login-body > p { margin: 12px 0 26px; color: #435c60; line-height: 1.5; }
+.login-body form { display: grid; border-top: 1px solid var(--rule); padding-top: 24px; }
+.login-body label { font-weight: 700; margin-bottom: 7px; }
+.login-body label:not(:first-child) { margin-top: 18px; }
+.login-body input { height: 46px; width: 100%; border: 1px solid #80928e; border-radius: 3px; background: #fff; padding: 0 12px; color: var(--ink); }
+.login-password { position: relative; }
+.login-password input { padding-right: 52px; }
+.login-password button { position: absolute; inset: 1px 1px 1px auto; width: 44px; display: grid; place-items: center; background: transparent; color: var(--ink); }
+.login-submit { margin-top: 26px; justify-content: space-between; }
