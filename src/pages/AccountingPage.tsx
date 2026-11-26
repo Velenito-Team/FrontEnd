@@ -3,6 +3,7 @@ import Modal from '../components/Modal'
 import { createFixedExpense, getMonthlyAccounting, type FixedExpense, type MonthlyAccounting } from '../services/api'
 import { money, today } from './SalesPage'
 import DailyAccountingView from './DailyAccountingView'
+import MonthlyBalance from './MonthlyBalance'
 
 export default function AccountingPage() {
   const [period, setPeriod] = useState(() => today().slice(0, 7))
@@ -47,7 +48,7 @@ function MonthlyExpenses({ period }: { period: string }) {
     return () => { active = false }
   }, [period, attempt])
 
-  const expenses = month?.gastosFijos ?? []
+  const expenses = Array.from(new Map(month?.gastosFijos.map(expense => [expense.id, expense])).values())
   const total = expenses.reduce((sum, expense) => sum + expense.monto, 0)
 
   return <>
@@ -65,12 +66,7 @@ function MonthlyExpenses({ period }: { period: string }) {
           <th scope="row">{expense.concepto}</th><td>{money(expense.monto)}</td><td>{expense.diaRecordatorio}</td>
         </tr>)}</tbody>
       </table></div> : <p>Todavía no hay gastos fijos registrados para este mes.</p>}
-      <h3>Balance mensual</h3>
-      {month.balance ? <dl className="settings-details">
-        <dt>Resultado operativo</dt><dd>{money(month.balance.resultadoOperativo)}</dd>
-        <dt>Gastos fijos incluidos</dt><dd>{money(month.balance.gastosFijos)}</dd>
-        <dt>Resultado neto</dt><dd>{money(month.balance.resultadoNeto)}</dd>
-      </dl> : <p>El balance mensual todavía no está disponible.</p>}
+      <MonthlyBalance period={period} balance={month.balance} expenses={expenses} fixedTotal={total} />
     </>}
     {editing && <FixedExpenseForm period={period} expenses={expenses} onClose={() => setEditing(false)}
       onSaved={() => {

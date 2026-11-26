@@ -299,7 +299,10 @@ it('registra un gasto fijo en el mes elegido y actualiza el resumen contable', a
   vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
   const expense = { id: 'gasto-1', concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8 }
   vi.mocked(api.getMonthlyAccounting).mockImplementation(async () => vi.mocked(api.createFixedExpense).mock.calls.length
-    ? { gastosFijos: [expense], balance: { resultadoOperativo: 800000, gastosFijos: 350000, resultadoNeto: 450000 } }
+    ? { gastosFijos: [expense, expense], balance: {
+        resultadoOperativo: 800000, cobros: 950000, egresosOperativos: 150000,
+        diasSinCierre: ['2026-10-15'], gastosFijosPendientes: true,
+      } }
     : { gastosFijos: [] })
   vi.mocked(api.createFixedExpense).mockResolvedValue(expense)
   render(<App />)
@@ -323,7 +326,13 @@ it('registra un gasto fijo en el mes elegido y actualiza el resumen contable', a
     concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8,
   }, expect.any(String))
   expect(api.getMonthlyAccounting).toHaveBeenLastCalledWith('2026-10')
-  expect(screen.getByText('Gastos fijos incluidos')).toBeTruthy()
+  expect(screen.getAllByRole('rowheader', { name: 'Arriendo' })).toHaveLength(1)
+  const money = (amount: number) => amount.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+  expect(screen.getByText('Gastos fijos incluidos').nextElementSibling?.textContent).toBe(money(350000))
+  expect(screen.getByText('Flujo operativo neto del mes').closest('dt')?.nextElementSibling?.textContent).toBe(money(450000))
+  expect(screen.getByText('Días sin cierre: 2026-10-15.')).toBeTruthy()
+  expect(screen.getByText(/gastos fijos del mes pendientes/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Exportar CSV' })).toBeTruthy()
 
   fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto fijo' }))
   fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'arriendo' } })
