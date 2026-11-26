@@ -270,4 +270,26 @@ it('valida los abonos y actualiza el saldo solo con la confirmación del servido
   await screen.findByText(/Abono registrado para María Pérez/)
   expect(savePayment).toHaveBeenLastCalledWith('a', 9000, expect.any(String))
   expect(screen.queryByRole('button', { name: 'Registrar abono' })).toBeNull()
+  expect(screen.getByText('No hay clientes con deuda activa.')).toBeTruthy()
+})
+
+it('lista primero las deudas mayores y permite buscar y consultar a todos los clientes', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  vi.mocked(api.getCustomers).mockResolvedValue([
+    { id: 'a', nombre: 'Ana', saldo: 1000 },
+    { id: 'b', nombre: 'Bruno', saldo: 0 },
+    { id: 'c', nombre: 'Carmen', saldo: 9000 },
+  ])
+  render(<App />)
+  enterDemo()
+  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
+  await screen.findByText('Carmen')
+  const rows = screen.getAllByRole('listitem')
+  expect(rows.map(row => row.querySelector('strong')?.textContent)).toEqual(['Carmen', 'Ana'])
+  expect(rows[0].textContent).toContain((9000).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }))
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar cliente' }), { target: { value: 'bruno' } })
+  expect(screen.getByText('No hay coincidencias para esa búsqueda.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Solo clientes con deuda activa' }))
+  expect(screen.getByText('Bruno')).toBeTruthy()
+  expect(screen.queryByText('Carmen')).toBeNull()
 })
