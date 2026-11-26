@@ -8,7 +8,7 @@ import * as api from './services/api'
 
 vi.mock('./services/api', () => ({
   getProducts: vi.fn(), getSettings: vi.fn(), getReport: vi.fn(), getSales: vi.fn(),
-  getCustomers: vi.fn(), getCustomerCredits: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
+  getCustomers: vi.fn(), getCustomerCredits: vi.fn(), registerCreditPayment: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
   deactivateProduct: vi.fn(), receiveStock: vi.fn(), createInvoice: vi.fn(),
   readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
 }))
@@ -237,4 +237,37 @@ it('registra clientes desde Fiados y muestra deuda y productos por compra', asyn
   expect(api.createCustomer).toHaveBeenCalledWith(expect.objectContaining({ nombre: client.nombre, autorizacion: true }))
   expect(await screen.findByText(/Arroz · 2 kg/)).toBeTruthy()
   expect(api.getCustomerCredits).toHaveBeenCalledWith(client.id)
+})
+
+it('valida los abonos y actualiza el saldo solo con la confirmación del servidor', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  vi.mocked(api.getCustomers).mockResolvedValue([{ id: 'a', nombre: 'María Pérez', saldo: 12000 }])
+  const savePayment = vi.mocked(api.registerCreditPayment)
+  savePayment.mockRejectedValueOnce(new Error('Conexión interrumpida')).mockResolvedValueOnce({ saldo: 9000 })
+    .mockResolvedValueOnce({ saldo: 0 })
+
+  render(<App />)
+  enterDemo()
+  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Registrar abono' }))
+  const amount = screen.getByLabelText('Monto del abono (COP)')
+  const confirm = screen.getByRole('button', { name: 'Confirmar abono' })
+  fireEvent.change(amount, { target: { value: '12001' } })
+  expect(confirm).toHaveProperty('disabled', true)
+  fireEvent.change(amount, { target: { value: '3000' } })
+  fireEvent.click(confirm)
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Conexión interrumpida')
+  fireEvent.click(confirm)
+  await screen.findByText(/Abono registrado para María Pérez/)
+  expect(savePayment.mock.calls[0]).toEqual(['a', 3000, expect.any(String)])
+  expect(savePayment.mock.calls[1]).toEqual(savePayment.mock.calls[0])
+
+  fireEvent.click(screen.getByRole('button', { name: 'Registrar abono' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Pagar todo el saldo' }))
+  expect(screen.getByLabelText('Monto del abono (COP)')).toHaveProperty('value', '9000')
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar abono' }))
+  await screen.findByText(/Abono registrado para María Pérez/)
+  expect(savePayment).toHaveBeenLastCalledWith('a', 9000, expect.any(String))
+  expect(screen.queryByRole('button', { name: 'Registrar abono' })).toBeNull()
 })
