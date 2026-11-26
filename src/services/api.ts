@@ -66,7 +66,13 @@ export type FixedExpenseInput = { concepto: string; monto: number; periodo: stri
 export type FixedExpense = FixedExpenseInput & { id: string }
 export type MonthlyAccounting = {
   gastosFijos: FixedExpense[]
-  balance?: { resultadoOperativo: number; gastosFijos: number; resultadoNeto: number }
+  balance?: {
+    resultadoOperativo: number // Suma de los balances diarios, antes de descontar gastos fijos.
+    cobros?: number
+    egresosOperativos?: number
+    diasSinCierre?: string[]
+    gastosFijosPendientes?: boolean
+  }
 }
 export type DailyAccounting =
   | { estadoCaja: 'abierta' | 'sin_cierre' }
