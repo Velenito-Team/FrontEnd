@@ -98,3 +98,57 @@ td, th { padding: 14px 12px; border-bottom: 1px solid #e1e8f0; vertical-align: m
   .table-scroll { overflow: visible; }
   td, th { padding: 7px; }
 }
+/* El punto de venta comparte tamaños de lectura y objetivos táctiles. */
+body { min-width: 0; font-size: 16px; }
+button, .button, .category-tabs button, .quantity-control button, .modal-close,
+input:not([type=checkbox]), select, .receipt-link, .check-label {
+  min-height: 44px; min-width: 44px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 3px solid #2169a7; outline-offset: 2px;
+}
+.cart-row { flex-wrap: wrap; padding-block: 8px; }
+.quantity-control { height: auto; gap: 2px; }
+.cart-row .cart-product { min-width: 95px; }
+.product-info { flex-wrap: wrap; }
+.product-info h3, .cart-product strong { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+.product-info h3, .product-info > strong, .cart-product strong, .cart-line-total,
+.empty-cart strong, .empty-products strong, .generate-button, .button, .nav-item,
+.filters label, .data-form label, .data-form p, table, .notice, .row-actions button,
+.payment-form label, .total-row, .product-meta, .product-category, .modal-subtitle,
+.empty-cart span, .empty-products span, .panel-heading p { font-size: 1rem; }
+.product-meta, .product-category, .modal-subtitle, .empty-cart span, .empty-products span,
+.panel-heading p { color: #425b70; }
+.product-grid > *, .main-content, .panel, .workspace-grid > * { min-width: 0; }
+.modal { max-height: 95dvh; overflow-y: auto; }
+.qr-frame { max-width: 100%; height: auto; aspect-ratio: 1; }
+.qr-frame canvas { max-width: 90%; height: auto !important; }
+@media (max-width: 700px) {
+  .heading-actions, .modal-actions { display: flex; flex-wrap: wrap; }
+  .qr-modal { padding-top: 62px; }
+  .product-grid { grid-template-columns: repeat(auto-fit,minmax(min(145px,100%),1fr)); }
+  .cart-list { overflow: visible; }
+}
+/* Azul tinta, papel crema y el toldo amarillo de la tienda. */
+body { background: #f7f5ed; color: #18384a; font-family: "Segoe UI", system-ui, sans-serif; }
+.sidebar { background: #153e4b; border-top: 7px solid #eeb942; }
+.brand-mark { background: #f6c448; color: #163e4a; border-radius: 9px; }
+.brand-name, .page-heading h1, .panel h2, .access-card h1 {
+  font-family: Georgia, serif; letter-spacing: -.035em;
+}
+.page-heading h1 { color: #17414b; font-size: clamp(32px,4vw,48px); }
+.nav-item.active { background: #ffdc82; color: #193c45; box-shadow: none; }
+.panel { border: 1px solid #d3d8cd; border-radius: 12px; box-shadow: 0 2px 0 #d3d8cd66; }
+.button-primary, .generate-button { background: #f5c247; color: #193b44; box-shadow: none; }
+.brand-lockup { margin-bottom: 24px; }
+.access-screen { min-height: 100dvh; display: grid; place-items: center; padding: 20px; background: #eaece1; }
+.access-card { position: relative; overflow: hidden; background: #fffdf6; border: 1px solid #bdc7bb; border-radius: 14px; width: min(100%,450px); padding: 54px 32px 32px; color: #173e48; }
+.awning { position: absolute; inset: 0 0 auto; height: 20px; background: repeating-linear-gradient(90deg,#17434c 0 28px,#efc24c 28px 56px); }
+.access-card h1 { font-size: 48px; margin: 8px 0 32px; }
+.access-card h2 { font-size: 23px; margin: 0; }
+.access-card p { line-height: 1.6; }
+.access-card button { width: 100%; margin-top: 12px; }
+.credit-search { display: grid; gap: 8px; max-width: 26rem; margin: 20px 0; }
+.credit-search input { border: 1px solid #b2c1bc; border-radius: 7px; padding: 8px 12px; }
+.credit-row { padding: 14px 0; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; border-top: 1px solid #d3d8cd; }
+.credit-row p { margin: 5px 0 0; color: #445f67; }

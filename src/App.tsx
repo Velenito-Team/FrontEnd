@@ -3,7 +3,10 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import jsQR from 'jsqr'
 import { QRCodeCanvas } from 'qrcode.react'
-import { createInvoice as createBackendInvoice, getProducts, getReport, getSettings, readReceipt, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer, type Settings as OperatorSettings } from './services/api'
+import { createInvoice as createBackendInvoice, getProducts, getReport, readReceipt, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer, type Settings as OperatorSettings } from './services/api'
+import AccessPage from './pages/AccessPage'
+import CreditPage from './pages/CreditPage'
+import { Store, BookOpen } from 'lucide-react'
 import ProductsPage from './pages/ProductsPage'
 import SalesPage, { today } from './pages/SalesPage'
 import OverviewPage from './pages/OverviewPage'
@@ -197,11 +200,13 @@ function App() {
     window.addEventListener('hashchange', changed)
     return () => window.removeEventListener('hashchange', changed)
   }, [])
+  const [operator, setOperator] = useState<OperatorSettings>()
   const token = linkToken(hash)
-  return hash.startsWith('#comprobante/') ? <PublicReceipt token={token ?? ''} /> : <PointOfSale />
+  return hash.startsWith('#comprobante/') ? <PublicReceipt token={token ?? ''} /> : operator ? <PointOfSale operator={operator} onExit={() => setOperator(undefined)} /> : <AccessPage onEnter={setOperator} />
 }
 
-function PointOfSale() {
+function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit: () => void }) {
+  const admin = operator.rol === 'administrador'
   const [page, setPage] = useState('Ventas')
   const [history, setHistory] = useState(false)
   const [preferences, setPreferences] = useState(readPreferences)
@@ -214,9 +219,8 @@ function PointOfSale() {
   const [lowOnly, setLowOnly] = useState(preferences.lowOnly)
   const [bestSelling, setBestSelling] = useState(false)
   const [ranking, setRanking] = useState<Record<string, number>>({})
-  const [operator, setOperator] = useState<OperatorSettings>()
   const searchInput = useRef<HTMLInputElement>(null)
-  const navigate = (next: string) => { if (!saving) { setPage(next); setHistory(false) } }
+  const navigate = (next: string) => { if (!saving && (admin || ['Ventas', 'Configuración'].includes(next))) { setPage(next); setHistory(false) } }
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [catalogError, setCatalogError] = useState('')
   const [activeCategory, setActiveCategory] = useState<Category>('Todos')
@@ -238,15 +242,15 @@ function PointOfSale() {
     getProducts().then((items) => {
       setCatalogProducts(items.filter((item) => item.activo).map(mapBackendProduct))
       setCatalogError('')
-    }).catch(() => setCatalogError('No se pudo cargar el catálogo. Comprueba el backend e intenta de nuevo.'))
+    }).catch(() => setCatalogError('No se pudo cargar el catálogo. Revisa tu conexión y pulsa Reintentar.'))
+    if (!admin) return
     const start = new Date(); start.setDate(start.getDate() - 30)
     getReport({ desde: start.toISOString().slice(0, 10), hasta: today() }).then(report =>
       setRanking(Object.fromEntries(report.productos.map(p => [p.productoId, p.cantidad])))).catch(() => undefined)
-  }, [])
+  }, [admin])
 
   useEffect(refreshProducts, [refreshProducts])
   useEffect(() => {
-    getSettings().then(setOperator).catch(() => undefined)
     const shortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault(); searchInput.current?.focus()
@@ -310,7 +314,7 @@ function PointOfSale() {
       setQrModalOpen(true)
       refreshProducts()
     } catch (error) {
-      setCapacityError(error instanceof Error ? error.message : 'No se pudo guardar la factura.')
+      setCapacityError(error instanceof Error ? error.message : 'No se pudo guardar la venta.')
     } finally {
       setSaving(false)
     }
@@ -321,13 +325,13 @@ function PointOfSale() {
       const token = linkToken(rawValue)
       const parsed = token ? displayReceipt(await readReceipt(token)) : JSON.parse(rawValue) as Invoice
       if (!parsed.invoiceNumber || !Array.isArray(parsed.items) || typeof parsed.totals?.total !== 'number') {
-        throw new Error('El código no contiene una factura válida.')
+        throw new Error('El código no contiene un comprobante válido.')
       }
       setScanSuccess(parsed)
       setScanError('')
     } catch (error) {
       setScanSuccess(null)
-      setScanError(error instanceof Error ? error.message : 'No se pudo leer la factura.')
+      setScanError(error instanceof Error ? error.message : 'No se pudo leer el comprobante.')
     }
   }, [])
 
@@ -339,7 +343,7 @@ function PointOfSale() {
       const quantity = (imported.get(line.productId)?.quantity ?? 0) + line.quantity
       if (!product || !Number.isFinite(quantity) || line.quantity <= 0 || quantity > product.stock
           || (!product.fractionable && !Number.isInteger(quantity))) {
-        setScanError('La factura contiene productos no disponibles o cantidades inválidas.')
+        setScanError('El comprobante contiene productos no disponibles o cantidades inválidas.')
         return
       }
       imported.set(product.id, { ...product, quantity })
@@ -371,24 +375,18 @@ function PointOfSale() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark"><QrCode size={22} strokeWidth={2.5} /></div>
+          <div className="brand-mark"><Store size={24} /></div>
           <div><span className="brand-name">El <span>Veleñito</span></span><small>Punto de venta de barrio</small></div>
-        </div>
-
-        <div className="store-switcher">
-          <div className="store-avatar">N</div>
-          <div><strong>Tienda El Veleñito</strong><span>Sede principal</span></div>
-          <ChevronDown size={16} />
         </div>
 
         <nav className="main-nav" aria-label="Navegación principal">
           <p className="nav-label">Menú principal</p>
-          <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>
+          {admin && <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>}
           <button className={page === 'Ventas' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Ventas')}><ShoppingCart size={18} /> Ventas</button>
-          <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>
-          <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>
-          <p className="nav-label nav-label-spaced">Administración</p>
-          <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>
+          {admin && <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>}
+          {admin && <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>}
+          {admin && <button className={page === 'Fiados' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Fiados')}><BookOpen size={18} /> Fiados</button>}
+          {admin && <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>}
           <button className={page === 'Configuración' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Configuración')}><Settings size={18} /> Configuración</button>
         </nav>
 
@@ -401,14 +399,14 @@ function PointOfSale() {
 
       <main className="main-content">
         <header className="topbar">
-          <div className="breadcrumb"><span>{page}</span><ChevronDown size={14} /><strong>{page === 'Ventas' ? history ? 'Historial' : 'Nueva factura' : 'Tienda El Veleñito'}</strong></div>
-          <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div><button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+          <div className="breadcrumb"><span>{page}</span><ChevronDown size={14} /><strong>{page === 'Ventas' ? history ? 'Historial' : 'Nueva venta' : 'Tienda El Veleñito'}</strong></div>
+          <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div>{admin && <button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button>}<button className="button button-secondary" disabled={saving} onClick={() => { if (!cart.length || window.confirm('¿Salir y descartar la venta en curso?')) onExit() }}>Salir</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
         </header>
 
         <div className="page-heading">
           {page !== 'Ventas' ? <div><h1>{page}</h1><p className="heading-copy">Tienda El Veleñito · Caja 01</p></div> : <>
-          <div><p className="eyebrow">Punto de venta <span></span> Caja 01</p><h1>Nueva factura</h1><p className="heading-copy">Crea una venta, genera su QR y mantén todo bajo control.</p></div>
-          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer factura QR</button><button className="button button-secondary" onClick={() => setHistory(current => !current)}>{history ? 'Volver a venta' : 'Historial'}</button><button disabled={saving} className="button button-primary" onClick={() => { setCart([]); setReceived(''); setCustomer(null); setCapacityError(''); setHistory(false) }}><FilePlus2 size={17} /> Nueva venta</button></div>
+          <div><p className="eyebrow">Punto de venta <span></span> Caja 01</p><h1>{history ? 'Historial de ventas' : 'Nueva venta'}</h1><p className="heading-copy">Selecciona los productos y confirma el cobro.</p></div>
+          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer comprobante QR</button>{admin && <button className="button button-secondary" onClick={() => setHistory(current => !current)}>{history ? 'Volver a venta' : 'Historial'}</button>}<button disabled={saving} className="button button-primary" onClick={() => { setCart([]); setReceived(''); setCustomer(null); setCapacityError(''); setHistory(false) }}><FilePlus2 size={17} /> Nueva venta</button></div>
           </>}
         </div>
 
@@ -419,8 +417,8 @@ function PointOfSale() {
 
         <div className="workspace-grid">
           <section className="catalog-panel panel">
-            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>Selecciona un producto para añadirlo a la factura.</p></div><button className="text-button" onClick={() => navigate('Productos')}>Ver catálogo <ArrowRight size={15} /></button></div>
-            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>Ctrl K</kbd></label><button className="filter-button" aria-pressed={bestSelling} onClick={() => setBestSelling(value => !value)}><span className="filter-dot"></span> {bestSelling ? 'Orden: más vendidos' : 'Más vendidos'}</button><label className="check-label"><input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} /> Stock bajo</label></div>
+            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>Selecciona un producto para añadirlo a la venta.</p></div>{admin && <button className="text-button" onClick={() => navigate('Productos')}>Ver catálogo <ArrowRight size={15} /></button>}</div>
+            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>Ctrl K</kbd></label>{admin && <button className="filter-button" aria-pressed={bestSelling} onClick={() => setBestSelling(value => !value)}><span className="filter-dot"></span> {bestSelling ? 'Orden: más vendidos' : 'Más vendidos'}</button>}<label className="check-label"><input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} /> Stock bajo</label></div>
             <div className="category-tabs">{categories.map((category) => <button key={category} className={activeCategory === category ? 'category-tab active' : 'category-tab'} onClick={() => setActiveCategory(category)}>{category}<span>{category === 'Todos' ? catalogProducts.length : catalogProducts.filter((p) => p.category === category).length}</span></button>)}</div>
             <div className="product-grid">{filteredProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={(item) => updateQuantity(item.id, 1)} />)}</div>
             {catalogError && <div className="capacity-error" role="alert">{catalogError} <button onClick={refreshProducts}>Reintentar</button></div>}
@@ -428,9 +426,9 @@ function PointOfSale() {
           </section>
 
           <section className="invoice-panel panel">
-            <div className="invoice-heading"><div><div className="invoice-label"><span className="invoice-live-dot"></span> Factura en curso</div><h2>Venta nueva</h2><p>{new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} <span>·</span> {itemCount} {itemCount === 1 ? 'artículo' : 'artículos'}</p></div><button className="more-button" aria-label="Más opciones" onClick={() => setActions(true)}><MoreDots /></button></div>
+            <div className="invoice-heading"><div><div className="invoice-label"><span className="invoice-live-dot"></span> Venta en curso</div><h2>Venta nueva</h2><p>{new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} <span>·</span> {itemCount} {itemCount === 1 ? 'artículo' : 'artículos'}</p></div><button className="more-button" aria-label="Más opciones" onClick={() => setActions(true)}><MoreDots /></button></div>
             <div className="invoice-customer"><div className="customer-icon"><UserRound size={17} /></div><div><span>Cliente</span><strong>{customer?.nombre ?? 'Consumidor final'}</strong></div><button disabled={saving} className="change-customer" onClick={() => setCustomerOpen(true)}>Cambiar <ChevronDown size={14} /></button></div>
-            <div className="cart-list">{cart.length ? cart.map((item) => <CartRow key={item.id} item={item} onChange={updateQuantity} onRemove={(id) => { if (saving) return; setCart((current) => current.filter((cartItem) => cartItem.id !== id)); setCapacityError('') }} />) : <div className="empty-cart"><ShoppingCart size={30} /><strong>Tu factura está vacía</strong><span>Selecciona productos del catálogo para comenzar.</span></div>}</div>
+            <div className="cart-list">{cart.length ? cart.map((item) => <CartRow key={item.id} item={item} onChange={updateQuantity} onRemove={(id) => { if (saving) return; setCart((current) => current.filter((cartItem) => cartItem.id !== id)); setCapacityError('') }} />) : <div className="empty-cart"><ShoppingCart size={30} /><strong>Tu venta está vacía</strong><span>Selecciona productos del catálogo para comenzar.</span></div>}</div>
             <div className="invoice-summary"><div className="total-row"><span>Total a pagar</span><strong>{money(total)}</strong></div></div>
             {capacityError && <div className="capacity-error" role="alert"><X size={15} /> {capacityError}</div>}
             <div className="data-form payment-form">
@@ -439,17 +437,18 @@ function PointOfSale() {
                 <option value="fiado">Fiado</option></select></label>
               {method === 'efectivo' && <label>Efectivo recibido (vacío para exacto)<input disabled={saving} type="number" min={total}
                 step="1" value={received} onChange={e => setReceived(e.target.value)} /></label>}
-              {method === 'efectivo' && received !== '' && <p>Cambio {money(Math.max(0, +received - total))}</p>}
-              {method === 'fiado' && <p>Cliente {customer?.nombre ?? 'Selecciona un cliente con autorización.'}</p>}
+              {method === 'efectivo' && received !== '' && <p role="status">{+received < total ? `Faltan ${money(total - +received)} para completar el pago.` : `Cambio ${money(+received - total)}`}</p>}
+              {method === 'fiado' && <p>{customer ? customer.nombre + ' · Saldo después de la venta: ' + money(customer.saldo + total) : 'Selecciona un cliente autorizado con el botón Cambiar.'}</p>}
             </div>
-            <button className="generate-button" disabled={!cart.length || saving || method === 'efectivo' && received !== '' && (!Number.isInteger(+received) || +received < total) || method === 'fiado' && !customer} onClick={openQrModal}><span><QrCode size={19} /> {saving ? 'Guardando…' : 'Generar factura y QR'}</span><ArrowRight size={18} /></button>
+            <button className="generate-button" disabled={!cart.length || saving || method === 'efectivo' && received !== '' && (!Number.isInteger(+received) || +received < total) || method === 'fiado' && !customer} onClick={openQrModal}><span><QrCode size={19} /> {saving ? 'Guardando…' : 'Confirmar venta'}</span><ArrowRight size={18} /></button>
             <p className="invoice-footnote"><Clipboard size={13} /> El comprobante se guarda al confirmar la venta.</p>
           </section>
         </div>
         </>}
+        {page === 'Fiados' && admin && <CreditPage onSale={c => { setCustomer(c); setMethod('fiado'); navigate('Ventas') }} />}
         {page === 'Resumen' && <OverviewPage onNavigate={navigate} />}
         {(page === 'Productos' || page === 'Inventario') && <ProductsPage key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
-        {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
+        {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage canManage={admin} key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
         {page === 'Configuración' && <SettingsPage onSaved={p => { setPreferences(p); setMethod(p.method); setLowOnly(p.lowOnly) }} />}
       </main>
       {customerOpen && <CustomerPicker onClose={() => setCustomerOpen(false)} onSelect={c => { setCustomer(c); setCustomerOpen(false); setMethod(c ? 'fiado' : preferences.method) }} />}
@@ -512,11 +511,11 @@ function QrModal({ url, invoice, canvasRef, copied, onCopy, onDownload, onClose 
       <section className={fullScreen ? 'modal qr-modal qr-modal-fullscreen' : 'modal qr-modal'} role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
         <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button>
         <button className="fullscreen-toggle" onClick={() => setFullScreen((current) => !current)} aria-label={fullScreen ? 'Salir de pantalla completa' : 'Poner QR en pantalla completa'}>{fullScreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{fullScreen ? 'Salir de pantalla completa' : 'QR a toda la pantalla'}</span></button>
-        <div className="modal-kicker"><span><QrCode size={15} /></span> Factura lista</div>
+        <div className="modal-kicker"><span><QrCode size={15} /></span> Venta confirmada</div>
         <h2 id="qr-modal-title">QR de {invoice.invoiceNumber}</h2>
         <p className="modal-subtitle">Escanea este código para abrir el comprobante.</p>
         <div className="qr-stage"><div className="qr-frame"><QRCodeCanvas ref={canvasRef} value={url} size={1024} level="H" boostLevel={false} includeMargin /></div><div className="qr-specs"><span><i></i> Versión automática</span><span><i></i> Corrección alta (H)</span></div></div>
-        <div className="qr-total"><span>Total de la factura</span><strong>{money(invoice.totals.total)}</strong></div>
+        <div className="qr-total"><span>Total de la venta</span><strong>{money(invoice.totals.total)}</strong></div>
         <div className="modal-actions"><button className="button button-secondary" onClick={onCopy}>{copied ? <><Check size={17} /> Copiado</> : <><Copy size={17} /> Copiar enlace</>}</button><button className="button button-primary" onClick={onDownload}><FileDown size={17} /> Descargar QR</button></div>
         <a className="button button-secondary receipt-link" href={url} target="_blank" rel="noreferrer">Abrir comprobante</a>
         <button className="button device-preview-button" onClick={() => setDeviceViewOpen(true)}><Monitor size={17} /> Ver en dispositivo 3D</button>
@@ -578,7 +577,7 @@ function ReaderModal({ onClose, onScan, scanError, scanSuccess, onLoad }: { onCl
 
   const submitManual = (event: FormEvent) => { event.preventDefault(); if (manualJson.trim()) onScan(manualJson.trim()) }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section className="modal reader-modal" role="dialog" aria-modal="true" aria-labelledby="reader-modal-title"><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="modal-kicker reader-kicker"><span><Camera size={15} /></span> Importar venta</div><h2 id="reader-modal-title">Leer factura QR</h2><p className="modal-subtitle">Escanea con la cámara o carga una imagen del código de factura.</p><div className="reader-layout"><div className="scanner-column"><div className="scanner-shell"><div id="qr-reader"></div><div id="qr-file-reader" className="file-scanner"></div>{cameraError && <div className="scanner-message"><Camera size={22} /><span>{cameraError}</span></div>}</div><label className="upload-button"><Upload size={16} /> Subir imagen QR<input type="file" accept="image/*" onChange={handleFile} /></label></div><div className="reader-divider"><span>o</span></div><form className="manual-column" onSubmit={submitManual}><label htmlFor="manual-json">Pegar enlace o JSON de factura</label><textarea id="manual-json" value={manualJson} onChange={(event) => setManualJson(event.target.value)} placeholder={'{\n  "invoiceNumber": "FAC-..."\n}'}></textarea><button className="button button-secondary" type="submit"><Clipboard size={16} /> Consultar factura</button></form></div>{scanError && <div className="scan-feedback error"><X size={16} /> {scanError}</div>}{scanSuccess && <div className="scan-feedback success"><div className="success-icon"><Check size={16} /></div><div><strong>Factura {scanSuccess.invoiceNumber} encontrada</strong><span>{scanSuccess.items.length} productos · Total {money(scanSuccess.totals.total)}</span></div><button className="button button-primary" onClick={onLoad}>Cargar factura</button></div>}<p className="modal-note">La factura leída reemplazará los productos de la venta actual.</p></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section className="modal reader-modal" role="dialog" aria-modal="true" aria-labelledby="reader-modal-title"><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="modal-kicker reader-kicker"><span><Camera size={15} /></span> Importar venta</div><h2 id="reader-modal-title">Leer comprobante QR</h2><p className="modal-subtitle">Escanea con la cámara o carga una imagen del código del comprobante.</p><div className="reader-layout"><div className="scanner-column"><div className="scanner-shell"><div id="qr-reader"></div><div id="qr-file-reader" className="file-scanner"></div>{cameraError && <div className="scanner-message"><Camera size={22} /><span>{cameraError}</span></div>}</div><label className="upload-button"><Upload size={16} /> Subir imagen QR<input type="file" accept="image/*" onChange={handleFile} /></label></div><div className="reader-divider"><span>o</span></div><form className="manual-column" onSubmit={submitManual}><label htmlFor="manual-json">Pegar enlace o JSON del comprobante</label><textarea id="manual-json" value={manualJson} onChange={(event) => setManualJson(event.target.value)} placeholder={'{\n  "invoiceNumber": "FAC-..."\n}'}></textarea><button className="button button-secondary" type="submit"><Clipboard size={16} /> Consultar comprobante</button></form></div>{scanError && <div className="scan-feedback error"><X size={16} /> {scanError}</div>}{scanSuccess && <div className="scan-feedback success"><div className="success-icon"><Check size={16} /></div><div><strong>Comprobante {scanSuccess.invoiceNumber} encontrado</strong><span>{scanSuccess.items.length} productos · Total {money(scanSuccess.totals.total)}</span></div><button className="button button-primary" onClick={onLoad}>Cargar venta</button></div>}<p className="modal-note">La venta importada reemplazará los productos de la venta actual.</p></section></div>
 }
 
 export default App

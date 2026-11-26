@@ -38,32 +38,36 @@ afterEach(cleanup)
 describe('Punto de venta', () => {
   it('carga el catálogo, registra la cantidad y el pago, y muestra el QR del comprobante guardado', async () => {
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
     const quantity = screen.getByRole('spinbutton', { name: 'Cantidad de Arroz' })
     expect((quantity as HTMLInputElement).value).toBe('0.125')
     fireEvent.change(screen.getByLabelText(/Efectivo recibido/), { target: { value: '2000' } })
-    fireEvent.click(screen.getByRole('button', { name: /Generar factura y QR/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
     expect(await screen.findByRole('link', { name: 'Abrir comprobante' })).toBeTruthy()
     expect(api.createInvoice).toHaveBeenCalledWith({
       lineas: [{ productoId: product.id, cantidad: .125 }], metodo: 'efectivo', recibido: 2000,
     }, expect.any(String))
-    expect(screen.getByText('Tu factura está vacía')).toBeTruthy()
+    expect(screen.getByText('Tu venta está vacía')).toBeTruthy()
   })
 
   it('mantiene el carrito y la misma clave de idempotencia al reintentar una respuesta fallida', async () => {
     vi.mocked(api.createInvoice).mockRejectedValueOnce(new Error('Conexión interrumpida'))
       .mockResolvedValueOnce({ comprobante: receipt, token: 'a'.repeat(64) })
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
-    fireEvent.click(screen.getByRole('button', { name: /Generar factura y QR/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Conexión interrumpida'))
-    fireEvent.click(screen.getByRole('button', { name: /Generar factura y QR/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
     await screen.findByRole('link', { name: 'Abrir comprobante' })
     expect(vi.mocked(api.createInvoice).mock.calls[0][1]).toBe(vi.mocked(api.createInvoice).mock.calls[1][1])
   })
 
-  it('navega por las seis secciones y conserva preferencias', async () => {
+  it('navega por las secciones de administración y conserva preferencias', async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', operador: 'Tendero', usuario: 'tendero', rol: 'administrador', replicaSet: 'rs0', primario: true })
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
     await screen.findByRole('button', { name: 'Añadir Arroz' })
     fireEvent.click(screen.getByRole('button', { name: /^Resumen$/ }))
     expect(await screen.findByRole('heading', { name: 'Actividad de hoy' })).toBeTruthy()
@@ -84,11 +88,12 @@ describe('Punto de venta', () => {
   it('selecciona el cliente autorizado y envía el fiado al servidor', async () => {
     vi.mocked(api.getCustomers).mockResolvedValue([{ id: '507f1f77bcf86cd799439013', nombre: 'Cliente autorizado', saldo: 0 }])
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
     fireEvent.click(screen.getByRole('button', { name: /Cambiar/ }))
     fireEvent.click(await screen.findByRole('button', { name: /Cliente autorizado/ }))
     expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('fiado')
-    fireEvent.click(screen.getByRole('button', { name: /Generar factura y QR/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
     await screen.findByRole('link', { name: 'Abrir comprobante' })
     expect(api.createInvoice).toHaveBeenCalledWith(expect.objectContaining({
       metodo: 'fiado', clienteId: '507f1f77bcf86cd799439013',
@@ -97,9 +102,10 @@ describe('Punto de venta', () => {
 
   it('impide confirmar efectivo insuficiente y muestra el stock insuficiente', async () => {
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
     fireEvent.change(screen.getByLabelText(/Efectivo recibido/), { target: { value: '1' } })
-    expect((screen.getByRole('button', { name: /Generar factura y QR/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /Confirmar venta/ }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Cantidad de Arroz'), { target: { value: '4' } })
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Stock insuficiente'))
     expect(api.createInvoice).not.toHaveBeenCalled()
@@ -124,7 +130,7 @@ describe('Formularios de gestión', () => {
 
   it('solicita un motivo para anular y vuelve a consultar las ventas', async () => {
     vi.mocked(api.cancelSale).mockResolvedValue({ ...receipt, estado: 'anulada' })
-    render(<SalesPage reportOnly={false} onReceipt={vi.fn()} onChange={vi.fn()} />)
+    render(<SalesPage canManage reportOnly={false} onReceipt={vi.fn()} onChange={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Anular' }))
     fireEvent.change(screen.getByLabelText('Motivo obligatorio'), { target: { value: 'Error de digitación' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar anulación' }))
@@ -152,7 +158,7 @@ describe('Formularios de gestión', () => {
   it('consulta ventas por medio y producto, y abre el comprobante guardado', async () => {
     const open = vi.fn()
     vi.mocked(api.reopenReceipt).mockResolvedValue({ comprobante: receipt, token: 'a'.repeat(64) })
-    render(<SalesPage reportOnly onReceipt={open} onChange={vi.fn()} />)
+    render(<SalesPage canManage reportOnly onReceipt={open} onChange={vi.fn()} />)
     await screen.findByRole('button', { name: 'Ver comprobante' })
     fireEvent.change(screen.getByLabelText('Medio'), { target: { value: 'nequi' } })
     fireEvent.change(screen.getByLabelText('Producto'), { target: { value: product.id } })
@@ -162,4 +168,29 @@ describe('Formularios de gestión', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ver comprobante' }))
     await waitFor(() => expect(open).toHaveBeenCalledWith(receipt, 'a'.repeat(64)))
   })
+})
+
+it('mantiene la caja cerrada ante un error y limita la navegación del cajero al entrar', async () => {
+  vi.mocked(api.getSettings).mockRejectedValueOnce(new Error('Sin conexión'))
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(api.getProducts).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+  await screen.findByRole('button', { name: 'Añadir Arroz' })
+  expect(screen.queryByRole('button', { name: 'Reportes' })).toBeNull()
+  expect(api.getReport).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
+  expect(screen.getByRole('button', { name: 'Entrar a la caja' })).toBeTruthy()
+})
+
+it('permite al administrador iniciar una venta desde el cuaderno de fiados', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  vi.mocked(api.getCustomers).mockResolvedValue([{ id: 'a', nombre: 'Cliente de ejemplo', saldo: 5000 }])
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Venta fiada' }))
+  expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('fiado')
+  expect(screen.getByText(/Saldo después de la venta/)).toBeTruthy()
 })

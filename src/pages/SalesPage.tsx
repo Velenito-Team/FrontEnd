@@ -9,8 +9,8 @@ export function today() {
 }
 export const money = (n: number) => n.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
-export default function SalesPage({ reportOnly, onReceipt, onChange }: {
-  reportOnly: boolean; onReceipt: (receipt: BackendReceipt, token: string) => void; onChange: () => void
+export default function SalesPage({ canManage = false, reportOnly, onReceipt, onChange }: {
+  canManage?: boolean; reportOnly: boolean; onReceipt: (receipt: BackendReceipt, token: string) => void; onChange: () => void
 }) {
   const [filters, setFilters] = useState<Filters>({ desde: today(), hasta: today() })
   const [data, setData] = useState<BackendReceipt[]>([])
@@ -78,7 +78,7 @@ export default function SalesPage({ reportOnly, onReceipt, onChange }: {
               try { const result = await reopenReceipt(sale.id); onReceipt(result.comprobante, result.token) }
               catch(e) { setError((e as Error).message) } finally { setBusy(false) }
             }}>Ver comprobante</button>
-            {sale.estado === 'confirmada' && new Date(sale.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today() &&
+            {canManage && sale.estado === 'confirmada' && new Date(sale.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today() &&
               <button onClick={() => { setReason(''); setSelected(sale) }}>Anular</button>}
           </td></tr>)}</tbody></table>{!data.length && <p>No hay ventas para este período.</p>}</div>
       <p className="muted">Los totales incluyen ventas fiadas vigentes. Los cobros se registran según el medio de pago.</p>
