@@ -62,9 +62,24 @@ export type CustomerCredit = {
   id: string; fecha: string; total: number; saldo: number; estado: string
   lineas: BackendReceipt['lineas']
 }
+export type FixedExpenseInput = { concepto: string; monto: number; periodo: string; diaRecordatorio: number }
+export type FixedExpense = FixedExpenseInput & { id: string }
+export type MonthlyAccounting = {
+  gastosFijos: FixedExpense[]
+  balance?: { resultadoOperativo: number; gastosFijos: number; resultadoNeto: number }
+}
 const json = (value: unknown): RequestInit => ({
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
 })
+export const getMonthlyAccounting = (period: string) =>
+  request<MonthlyAccounting>(`/api/accounting/monthly?periodo=${encodeURIComponent(period)}`)
+
+export function createFixedExpense(expense: FixedExpenseInput, key: string) {
+  const init = json(expense)
+  return request<FixedExpense>('/api/accounting/fixed-expenses', {
+    ...init, headers: { ...init.headers, 'Idempotency-Key': key },
+  })
+}
 const query = (filters: Filters) => new URLSearchParams(
   Object.entries(filters).filter(([, value]) => !!value) as [string, string][],
 ).toString()
