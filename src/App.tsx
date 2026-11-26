@@ -6,7 +6,8 @@ import { QRCodeCanvas } from 'qrcode.react'
 import { createInvoice as createBackendInvoice, getProducts, getReport, readReceipt, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer, type Settings as OperatorSettings } from './services/api'
 import AccessPage from './pages/AccessPage'
 import CreditPage from './pages/CreditPage'
-import { Store, BookOpen } from 'lucide-react'
+import AccountingPage from './pages/AccountingPage'
+import { Store, BookOpen, Calculator } from 'lucide-react'
 import ProductsPage from './pages/ProductsPage'
 import SalesPage, { today } from './pages/SalesPage'
 import OverviewPage from './pages/OverviewPage'
@@ -219,7 +220,7 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
   const [bestSelling, setBestSelling] = useState(false)
   const [ranking, setRanking] = useState<Record<string, number>>({})
   const searchInput = useRef<HTMLInputElement>(null)
-  const navigate = (next: string) => { if (!saving && (next !== 'Fiados' || admin)) { setPage(next); setHistory(false) } }
+  const navigate = (next: string) => { if (!saving && (admin || !['Fiados', 'Contabilidad'].includes(next))) { setPage(next); setHistory(false) } }
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [catalogError, setCatalogError] = useState('')
   const [activeCategory, setActiveCategory] = useState<Category>('Todos')
@@ -385,6 +386,7 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
           <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>
           <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>
           {admin && <button className={page === 'Fiados' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Fiados')}><BookOpen size={18} /> Fiados</button>}
+          {admin && <button className={page === 'Contabilidad' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Contabilidad')}><Calculator size={18} /> Contabilidad</button>}
           <p className="nav-label nav-label-spaced">Administración</p>
           <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>
           <button className={page === 'Configuración' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Configuración')}><Settings size={18} /> Configuración</button>
@@ -442,6 +444,7 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
         </div>
         </>}
         {page === 'Fiados' && admin && <CreditPage onSale={c => { setCustomer(c); setMethod('fiado'); navigate('Ventas') }} />}
+        {page === 'Contabilidad' && admin && <AccountingPage />}
         {page === 'Resumen' && <OverviewPage onNavigate={navigate} />}
         {(page === 'Productos' || page === 'Inventario') && <ProductsPage canManage={admin} key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
         {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage canManage={admin} key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}

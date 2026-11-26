@@ -9,6 +9,7 @@ import * as api from './services/api'
 vi.mock('./services/api', () => ({
   getProducts: vi.fn(), getSettings: vi.fn(), getReport: vi.fn(), getSales: vi.fn(),
   getCustomers: vi.fn(), getCustomerCredits: vi.fn(), registerCreditPayment: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
+  getMonthlyAccounting: vi.fn(), createFixedExpense: vi.fn(),
   deactivateProduct: vi.fn(), receiveStock: vi.fn(), createInvoice: vi.fn(),
   readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
 }))
@@ -292,4 +293,43 @@ it('lista primero las deudas mayores y permite buscar y consultar a todos los cl
   fireEvent.click(screen.getByRole('checkbox', { name: 'Solo clientes con deuda activa' }))
   expect(screen.getByText('Bruno')).toBeTruthy()
   expect(screen.queryByText('Carmen')).toBeNull()
+})
+
+it('registra un gasto fijo en el mes elegido y actualiza el resumen contable', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  const expense = { id: 'gasto-1', concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8 }
+  vi.mocked(api.getMonthlyAccounting).mockImplementation(async () => vi.mocked(api.createFixedExpense).mock.calls.length
+    ? { gastosFijos: [expense], balance: { resultadoOperativo: 800000, gastosFijos: 350000, resultadoNeto: 450000 } }
+    : { gastosFijos: [] })
+  vi.mocked(api.createFixedExpense).mockResolvedValue(expense)
+  render(<App />)
+  enterDemo()
+  fireEvent.click(await screen.findByRole('button', { name: 'Contabilidad' }))
+  fireEvent.change(screen.getByLabelText('Mes del balance'), { target: { value: expense.periodo } })
+  await screen.findByText('Todavía no hay gastos fijos registrados para este mes.')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto fijo' }))
+  fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: '  Arriendo  ' } })
+  fireEvent.change(screen.getByLabelText('Monto (COP)'), { target: { value: '350000' } })
+  const reminder = screen.getByLabelText('Día de recordatorio')
+  fireEvent.change(reminder, { target: { value: '29' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+  expect(api.createFixedExpense).not.toHaveBeenCalled()
+  fireEvent.change(reminder, { target: { value: '8' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+  expect(await screen.findByRole('rowheader', { name: 'Arriendo' })).toBeTruthy()
+  expect(api.createFixedExpense).toHaveBeenCalledWith({
+    concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8,
+  }, expect.any(String))
+  expect(api.getMonthlyAccounting).toHaveBeenLastCalledWith('2026-10')
+  expect(screen.getByText('Gastos fijos incluidos')).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto fijo' }))
+  fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'arriendo' } })
+  fireEvent.change(screen.getByLabelText('Monto (COP)'), { target: { value: '300000' } })
+  fireEvent.change(screen.getByLabelText('Día de recordatorio'), { target: { value: '10' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+  expect(await screen.findByText('Ya hay un gasto con este concepto en el mes seleccionado.')).toBeTruthy()
+  expect(api.createFixedExpense).toHaveBeenCalledTimes(1)
 })
