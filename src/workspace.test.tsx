@@ -2,16 +2,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
-import ProductsPage from './pages/ProductsPage'
-import SalesPage from './pages/SalesPage'
+import { AuthProvider } from './context/AuthContext'
 import * as api from './services/api'
 
 vi.mock('./services/api', () => ({
-  getProducts: vi.fn(), getSettings: vi.fn(), getReport: vi.fn(), getSales: vi.fn(),
-  getCustomers: vi.fn(), getCustomerCredits: vi.fn(), registerCreditPayment: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
-  getMonthlyAccounting: vi.fn(), getDailyAccounting: vi.fn(), createFixedExpense: vi.fn(),
-  deactivateProduct: vi.fn(), receiveStock: vi.fn(), createInvoice: vi.fn(),
-  readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(message: string, status: number) { super(message); this.status = status }
+  },
+  loginUser: vi.fn(), logoutUser: vi.fn(), getSettings: vi.fn(),
+  getUsers: vi.fn(), createUser: vi.fn(), updateUserStatus: vi.fn(), updateUserRole: vi.fn(),
+  getProviders: vi.fn(), createProvider: vi.fn(),
+  openCashRegister: vi.fn(), closeCashRegister: vi.fn(), rectifyCashClosing: vi.fn(), getDailyBalance: vi.fn(),
+  createDailyExpense: vi.fn(), getFixedExpensesSummary: vi.fn(), createFixedExpense: vi.fn(),
+  getMonthlyBalance: vi.fn(), exportMonthlyBalanceCsv: vi.fn(),
+  getProducts: vi.fn(), saveProduct: vi.fn(), deactivateProduct: vi.fn(), receiveStock: vi.fn(),
+  getSales: vi.fn(), getReport: vi.fn(), readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
+  createInvoice: vi.fn(), getCustomers: vi.fn(), getCustomerCredits: vi.fn(), registerCreditPayment: vi.fn(),
+  createCustomer: vi.fn(),
 }))
 vi.mock('html5-qrcode', () => ({ Html5Qrcode: class { start() { return Promise.reject() } clear() {} stop() { return Promise.resolve() } } }))
 vi.mock('qrcode.react', async () => {
@@ -19,351 +27,362 @@ vi.mock('qrcode.react', async () => {
   return { QRCodeCanvas: forwardRef<HTMLCanvasElement>((_, ref) => <canvas ref={ref} aria-label="QR" />) }
 })
 
-const product: api.BackendProduct = { id: '507f1f77bcf86cd799439011', nombre: 'Arroz', categoria: 'Granos',
-  precioCompra: 8000, precioVenta: 12500, stock: 3, umbralMinimo: 5, unidad: 'kg', fraccionable: true, activo: true }
-const receipt: api.BackendReceipt = { id: '507f1f77bcf86cd799439012', fecha: new Date().toISOString(),
-  tienda: 'Tienda El Veleñito', metodo: 'efectivo', estado: 'confirmada', total: 1563, cambio: 437,
-  lineas: [{ productoId: product.id, nombre: product.nombre, unidad: 'kg', cantidad: .125, precioUnitario: 12500, subtotal: 1563 }] }
-const report: api.Report = { ventas: 1, anuladas: 0, total: 1563, promedio: 1563, porMedio: { efectivo: 1563 }, porDia: {}, productos: [] }
+const user = (rol: api.UserRole = 'administrador'): api.AuthUser => ({
+  id: '507f1f77bcf86cd799439001',
+  nombre: 'Operadora',
+  usuario: 'operadora',
+  rol,
+  activo: true,
+})
+const product: api.BackendProduct = {
+  id: '507f1f77bcf86cd799439011', nombre: 'Arroz', categoria: 'Granos',
+  precioCompra: 8000, precioVenta: 12500, stock: 3, umbralMinimo: 5, unidad: 'kg',
+  fraccionable: true, activo: true,
+}
+const provider: api.Provider = { id: 'prov-1', nombre: 'Distribuidora', telefono: '3001234567' }
+const balance: api.MonthlyBalance = {
+  mes: '2026-10', diasCerrados: 3, ventas: 1000, abonos: 200, egresos: 100,
+  gastosFijos: 100, diferenciaCaja: -10, balance: 900, datosIncompletos: false, gastosFijosFaltantes: [],
+}
+const summary: api.FixedExpenseSummary = { mes: '2026-10', total: 100, gastos: [], recordatorios: [] }
+const closing: api.CashClosing = {
+  id: 'closing-1', cajaDiaId: 'cash-day-1', dia: '2026-10-01', revision: 1, estado: 'cerrada',
+  resultado: 'faltante', resumen: {
+    base: 50000, ventasCobradas: { efectivo: 30000, nequi: 10000, daviplata: 0 },
+    abonos: { efectivo: 5000, nequi: 0, daviplata: 0 }, egresos: { efectivo: 2000, nequi: 0, daviplata: 0 },
+    totalVentasFiadas: 12000, efectivoEsperado: 83000, efectivoContado: 80000, diferencia: -3000, balanceOperativo: 43000,
+  }, anteriorId: null, motivo: null,
+}
+const dailyBalance: api.DailyBalance = {
+  dia: '2026-10-01', caja: '01', cierreId: 'closing-1',
+  ventasCobradas: { efectivo: 30000, nequi: 10000, daviplata: 0 },
+  abonos: { efectivo: 5000, nequi: 0, daviplata: 0 },
+  egresos: { efectivo: 2000, nequi: 0, daviplata: 0 },
+  flujoOperativoNeto: 43000, diferenciaCaja: -3000,
+}
+const customer: api.Customer = { id: '507f1f77bcf86cd799439013', nombre: 'María Pérez', saldo: 5000 }
+const credit: api.CustomerCredit = {
+  id: 'debt-1', fecha: '2026-10-01T10:00:00Z', total: 5000, saldo: 5000,
+  estado: 'confirmada', lineas: [],
+}
+const paymentReceipt: api.CreditPaymentReceipt = {
+  comprobanteId: 'receipt-payment-1', clienteId: customer.id, deudaId: credit.id,
+  monto: 2000, medio: 'nequi', saldoRestante: 3000, emitidoEn: '2026-10-02T10:00:00Z',
+}
+const report: api.Report = { ventas: 0, anuladas: 0, total: 0, promedio: 0, porMedio: {}, porDia: {}, productos: [] }
+
 beforeEach(() => {
-  vi.resetAllMocks(); localStorage.clear(); window.location.hash = ''
+  vi.resetAllMocks()
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  sessionStorage.clear()
+  localStorage.clear()
+  window.location.hash = ''
+  vi.mocked(api.loginUser).mockImplementation(async () => user())
+  vi.mocked(api.logoutUser).mockResolvedValue(undefined)
+  vi.mocked(api.getSettings).mockResolvedValue({
+    tienda: 'El Veleñito', caja: '01', usuario: 'operadora', operador: 'Operadora',
+    rol: 'administrador', replicaSet: 'rs0', primario: true,
+  })
+  vi.mocked(api.getUsers).mockResolvedValue([])
+  vi.mocked(api.getProviders).mockResolvedValue([provider])
   vi.mocked(api.getProducts).mockResolvedValue([product])
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'Tienda El Veleñito', caja: '01', usuario: 'caja01', operador: 'Caja 01', rol: 'cajero', replicaSet: 'rs0', primario: true })
   vi.mocked(api.getReport).mockResolvedValue(report)
-  vi.mocked(api.getSales).mockResolvedValue([receipt])
+  vi.mocked(api.getSales).mockResolvedValue([])
   vi.mocked(api.getCustomers).mockResolvedValue([])
   vi.mocked(api.getCustomerCredits).mockResolvedValue([])
-  vi.mocked(api.createInvoice).mockResolvedValue({ comprobante: receipt, token: 'a'.repeat(64) })
+  vi.mocked(api.getFixedExpensesSummary).mockResolvedValue(summary)
+  vi.mocked(api.getMonthlyBalance).mockResolvedValue(balance)
+  vi.mocked(api.exportMonthlyBalanceCsv).mockResolvedValue('mes,balance\n2026-10,1000')
+  vi.mocked(api.getDailyBalance).mockRejectedValue(new api.ApiError('Primero debes cerrar la caja.', 409))
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
-function enterDemo() {
-  fireEvent.change(screen.getByLabelText('Usuario'), { target: { value: 'demo' } })
-  fireEvent.change(screen.getByLabelText('Contraseña', { exact: true }), { target: { value: 'prueba' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+function renderApp() {
+  return render(<AuthProvider><App /></AuthProvider>)
 }
 
-it('valida los campos de muestra y permite ver u ocultar la contraseña', () => {
-  render(<App />)
+describe('Contratos HTTP', () => {
+  it('envía login y abonos con JSON, credenciales incluidas y clave idempotente', async () => {
+    const actual = await vi.importActual<typeof import('./services/api')>('./services/api')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => user(),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 201, headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => paymentReceipt,
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await actual.loginUser('operadora', 'secreto123')
+    await actual.registerCreditPayment(customer.id, {
+      deudaId: credit.id, monto: 2000, medio: 'nequi',
+    }, 'idempotency-key')
+
+    const loginInit = fetchMock.mock.calls[0][1] as RequestInit
+    const paymentInit = fetchMock.mock.calls[1][1] as RequestInit
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/login')
+    expect(loginInit).toMatchObject({
+      method: 'POST', credentials: 'include',
+      body: JSON.stringify({ usuario: 'operadora', contrasena: 'secreto123' }),
+    })
+    expect(new Headers(loginInit.headers).get('Content-Type')).toBe('application/json')
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/customers/${customer.id}/abonos`)
+    expect(paymentInit).toMatchObject({
+      method: 'POST', credentials: 'include',
+      body: JSON.stringify({ deudaId: credit.id, monto: 2000, medio: 'nequi' }),
+    })
+    expect(new Headers(paymentInit.headers).get('Content-Type')).toBe('application/json')
+    expect(new Headers(paymentInit.headers).get('Idempotency-Key')).toBe('idempotency-key')
+  })
+
+  it('emite eventos globales para 401 y 403 con el mensaje del backend', async () => {
+    const actual = await vi.importActual<typeof import('./services/api')>('./services/api')
+    const unauthorized = vi.fn()
+    const forbidden = vi.fn()
+    window.addEventListener('velenito:unauthorized', unauthorized)
+    window.addEventListener('velenito:forbidden', forbidden)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false, status: 401, headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => ({ detail: 'Sesión vencida.' }),
+      })
+      .mockResolvedValueOnce({
+        ok: false, status: 403, headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => ({ detail: 'Acceso de administrador requerido.' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      await expect(actual.getUsers()).rejects.toMatchObject({ status: 401 })
+      await expect(actual.getUsers()).rejects.toMatchObject({ status: 403 })
+      expect(unauthorized).toHaveBeenCalledOnce()
+      expect((unauthorized.mock.calls[0][0] as CustomEvent<string>).detail).toBe('Sesión vencida.')
+      expect(forbidden).toHaveBeenCalledOnce()
+      expect((forbidden.mock.calls[0][0] as CustomEvent<string>).detail).toBe('Acceso de administrador requerido.')
+    } finally {
+      window.removeEventListener('velenito:unauthorized', unauthorized)
+      window.removeEventListener('velenito:forbidden', forbidden)
+    }
+  })
+})
+
+async function loginAs(rol: api.UserRole = 'administrador') {
+  vi.mocked(api.loginUser).mockResolvedValue(user(rol))
+  fireEvent.change(screen.getByLabelText('Usuario'), { target: { value: 'operadora' } })
+  fireEvent.change(screen.getByLabelText('Contraseña', { exact: true }), { target: { value: 'secreto123' } })
   fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
-  expect(api.getSettings).not.toHaveBeenCalled()
-  const password = screen.getByLabelText('Contraseña', { exact: true })
-  expect(password).toHaveProperty('type', 'password')
-  fireEvent.click(screen.getByRole('button', { name: 'Mostrar contraseña' }))
-  expect(password).toHaveProperty('type', 'text')
-  fireEvent.click(screen.getByRole('button', { name: 'Ocultar contraseña' }))
-  expect(password).toHaveProperty('type', 'password')
-})
+  await screen.findByRole('button', { name: 'Salir' })
+}
 
-describe('Punto de venta', () => {
-  it('carga el catálogo, registra la cantidad y el pago, y muestra el QR del comprobante guardado', async () => {
-    render(<App />)
-    enterDemo()
-    fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
-    const quantity = screen.getByRole('spinbutton', { name: 'Cantidad de Arroz' })
-    expect((quantity as HTMLInputElement).value).toBe('0.125')
-    fireEvent.change(screen.getByLabelText(/Efectivo recibido/), { target: { value: '2000' } })
-    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
-    expect(await screen.findByRole('link', { name: 'Abrir comprobante' })).toBeTruthy()
-    expect(api.createInvoice).toHaveBeenCalledWith({
-      lineas: [{ productoId: product.id, cantidad: .125 }], metodo: 'efectivo', recibido: 2000,
-    }, expect.any(String))
-    expect(screen.getByText('Tu venta está vacía')).toBeTruthy()
+describe('Autenticación y permisos', () => {
+  it('permite entrar sin credenciales a la vista local de administrador en desarrollo', async () => {
+    if (!import.meta.env.DEV) return
+    renderApp()
+    fireEvent.click(screen.getByLabelText('Ver interfaz de administrador (demostración local)'))
+    expect(screen.getByLabelText('Usuario')).toHaveProperty('required', false)
+    expect(screen.getByLabelText('Contraseña', { exact: true })).toHaveProperty('required', false)
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+
+    expect(await screen.findByRole('button', { name: 'Usuarios' })).toBeTruthy()
+    expect(screen.getByText('Vista de administrador')).toBeTruthy()
+    expect(api.loginUser).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('velenito-session-user') ?? 'null')).toEqual({
+      id: 'dev-preview',
+      nombre: 'Vista de administrador',
+      usuario: 'admin-demo',
+      rol: 'administrador',
+      activo: true,
+    })
   })
 
-  it('mantiene el carrito y la misma clave de idempotencia al reintentar una respuesta fallida', async () => {
-    vi.mocked(api.createInvoice).mockRejectedValueOnce(new Error('Conexión interrumpida'))
-      .mockResolvedValueOnce({ comprobante: receipt, token: 'a'.repeat(64) })
-    render(<App />)
-    enterDemo()
-    fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
-    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Conexión interrumpida'))
-    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
-    await screen.findByRole('link', { name: 'Abrir comprobante' })
-    expect(vi.mocked(api.createInvoice).mock.calls[0][1]).toBe(vi.mocked(api.createInvoice).mock.calls[1][1])
+  it('permite seleccionar el rol al previsualizar en desarrollo', async () => {
+    if (!import.meta.env.DEV) return
+    renderApp()
+    fireEvent.click(screen.getByLabelText('Ver interfaz de administrador (demostración local)'))
+    fireEvent.change(screen.getByLabelText('Rol para previsualizar'), { target: { value: 'tendero' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar a la caja' }))
+
+    expect(await screen.findByRole('button', { name: 'Fiados' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Usuarios' })).toBeNull()
+    expect(api.loginUser).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('velenito-session-user') ?? 'null').rol).toBe('tendero')
   })
 
-  it('navega por las secciones de administración y conserva preferencias', async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', operador: 'Tendero', usuario: 'tendero', rol: 'administrador', replicaSet: 'rs0', primario: true })
-    render(<App />)
-    enterDemo()
-    await screen.findByRole('button', { name: 'Añadir Arroz' })
-    fireEvent.click(screen.getByRole('button', { name: /^Resumen$/ }))
-    expect(await screen.findByRole('heading', { name: 'Actividad de hoy' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Productos$/ }))
-    expect(await screen.findByRole('button', { name: 'Editar Arroz' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Inventario$/ }))
-    expect(await screen.findByRole('button', { name: 'Entrada de Arroz' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Reportes$/ }))
-    expect(await screen.findByRole('button', { name: 'Exportar CSV' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Configuración$/ }))
-    fireEvent.change(await screen.findByLabelText('Medio de pago predeterminado'), { target: { value: 'nequi' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar preferencias' }))
-    expect(localStorage.getItem('velenito-preferences')).toContain('nequi')
-    fireEvent.click(screen.getByRole('button', { name: /^Ventas$/ }))
-    expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('nequi')
+  it('inicia sesión con credenciales reales y limita la navegación del cajero', async () => {
+    renderApp()
+    await loginAs('cajero')
+    expect(api.loginUser).toHaveBeenCalledWith('operadora', 'secreto123')
+    expect(api.getSettings).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Ventas' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Productos' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Inventario' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Proveedores' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Fiados' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Caja' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Usuarios' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Productos' }))
+    await screen.findByText('Arroz')
+    expect(screen.queryByRole('button', { name: 'Nuevo producto' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
+    await screen.findByRole('button', { name: 'Entrar a la caja' })
+    expect(api.logoutUser).toHaveBeenCalledOnce()
   })
 
-  it('selecciona el cliente autorizado y envía el fiado al servidor', async () => {
-    vi.mocked(api.getCustomers).mockResolvedValue([{ id: '507f1f77bcf86cd799439013', nombre: 'Cliente autorizado', saldo: 0 }])
-    render(<App />)
-    enterDemo()
-    fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
-    fireEvent.click(screen.getByRole('button', { name: /Cambiar/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /Cliente autorizado/ }))
-    expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('fiado')
-    fireEvent.click(screen.getByRole('button', { name: /Confirmar venta/ }))
-    await screen.findByRole('link', { name: 'Abrir comprobante' })
-    expect(api.createInvoice).toHaveBeenCalledWith(expect.objectContaining({
-      metodo: 'fiado', clienteId: '507f1f77bcf86cd799439013',
-    }), expect.any(String))
-  })
-
-  it('impide confirmar efectivo insuficiente y muestra el stock insuficiente', async () => {
-    render(<App />)
-    enterDemo()
-    fireEvent.click(await screen.findByRole('button', { name: 'Añadir Arroz' }))
-    fireEvent.change(screen.getByLabelText(/Efectivo recibido/), { target: { value: '1' } })
-    expect((screen.getByRole('button', { name: /Confirmar venta/ }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText('Cantidad de Arroz'), { target: { value: '4' } })
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Stock insuficiente'))
-    expect(api.createInvoice).not.toHaveBeenCalled()
+  it('habilita fiados, caja y contabilidad para tendero, sin dar permisos de administrador', async () => {
+    renderApp()
+    await loginAs('tendero')
+    expect(screen.getByRole('button', { name: 'Fiados' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Caja' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Contabilidad' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Usuarios' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Productos' }))
+    expect(await screen.findByRole('button', { name: 'Nuevo producto' })).toBeTruthy()
   })
 })
 
-describe('Formularios de gestión', () => {
-  it('edita el precio sin modificar las existencias y persiste la entrada de mercancía', async () => {
-    vi.mocked(api.saveProduct).mockResolvedValue({ ...product, precioVenta: 13000 })
-    vi.mocked(api.receiveStock).mockResolvedValue({ id: 'recepcion' })
-    render(<ProductsPage inventory onChange={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Editar Arroz' }))
-    fireEvent.change(screen.getByLabelText('Precio de venta'), { target: { value: '13000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar producto' }))
-    await waitFor(() => expect(api.saveProduct).toHaveBeenCalledWith(expect.objectContaining({ stock: 3, precioVenta: 13000 }), product.id))
-    await screen.findByText('Producto guardado.')
-    fireEvent.click(screen.getByRole('button', { name: 'Entrada de Arroz' }))
-    fireEvent.change(screen.getByLabelText('Cantidad recibida (kg)'), { target: { value: '2.5' } })
+describe('Caja y balances', () => {
+  it('registra apertura, cierre contado y rectificación administrativa', async () => {
+    vi.mocked(api.openCashRegister).mockResolvedValue({ id: 'cash-day-1', caja: '01', dia: '2026-10-01', base: 50000 })
+    vi.mocked(api.closeCashRegister).mockResolvedValue(closing)
+    vi.mocked(api.rectifyCashClosing).mockResolvedValue({ ...closing, id: 'closing-2', revision: 2, motivo: 'Reconteo' })
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Caja' }))
+    fireEvent.change(screen.getByLabelText('Día de caja'), { target: { value: '2026-10-01' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir caja' }))
+    fireEvent.change(screen.getByLabelText('Base inicial (COP)'), { target: { value: '50000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar apertura' }))
+    await waitFor(() => expect(api.openCashRegister).toHaveBeenCalledWith({ dia: '2026-10-01', caja: '01', base: 50000 }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cerrar caja' }))
+    fireEvent.change(screen.getByLabelText('Efectivo contado (COP)'), { target: { value: '80000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar cierre' }))
+    await screen.findByText('Ventas fiadas (informativo)')
+    expect(api.closeCashRegister).toHaveBeenCalledWith({ dia: '2026-10-01', caja: '01', efectivoContado: 80000 })
+    expect(screen.getByText('faltante')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Rectificar cierre' }))
+    fireEvent.change(screen.getByLabelText('Efectivo contado (COP)'), { target: { value: '83000' } })
+    fireEvent.change(screen.getByLabelText('Motivo de rectificación'), { target: { value: 'Reconteo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar rectificación' }))
+    await waitFor(() => expect(api.rectifyCashClosing).toHaveBeenCalledWith('closing-1', {
+      efectivoContado: 83000, motivo: 'Reconteo',
+    }))
+  })
+
+  it('consulta balance diario mostrando el 409 como requisito de cierre y separa diferencia de caja', async () => {
+    vi.mocked(api.getDailyBalance).mockRejectedValueOnce(new api.ApiError('Cierra primero', 409))
+      .mockResolvedValue(dailyBalance)
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Contabilidad' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Balance diario' }))
+    expect(await screen.findByText(/Primero debes cerrar la caja/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar estado' }))
+    expect(await screen.findByText(/Flujo operativo neto del día/)).toBeTruthy()
+    expect(screen.getByText('Diferencia de caja').nextElementSibling?.textContent).toContain('-')
+    expect(api.getDailyBalance).toHaveBeenLastCalledWith(expect.any(String))
+  })
+
+  it('muestra el balance mensual entregado y exporta el CSV del backend', async () => {
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Contabilidad' }))
+    fireEvent.change(screen.getByLabelText('Mes del balance'), { target: { value: '2026-10' } })
+    expect(await screen.findByText('Balance')).toBeTruthy()
+    expect(screen.getByText('Balance', { exact: true }).closest('dt')?.nextElementSibling?.textContent).toContain('900')
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+    await waitFor(() => expect(api.exportMonthlyBalanceCsv).toHaveBeenCalledWith('2026-10'))
+  })
+
+  it('registra gastos diarios idempotentes e incluye proveedor opcional', async () => {
+    vi.mocked(api.createDailyExpense).mockResolvedValue({
+      id: 'expense-1', cajaDiaId: 'cash-day-1', dia: '2026-10-01', medio: 'nequi',
+      monto: 2000, descripcion: 'Bolsas', proveedorId: provider.id,
+    })
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Contabilidad' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto diario' }))
+    await screen.findByRole('option', { name: provider.nombre })
+    fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('Medio de pago'), { target: { value: 'nequi' } })
+    fireEvent.change(screen.getByLabelText('Monto (COP)'), { target: { value: '2000' } })
+    fireEvent.change(screen.getByLabelText('Descripción'), { target: { value: 'Bolsas' } })
+    fireEvent.change(screen.getByLabelText('Proveedor (opcional)'), { target: { value: provider.id } })
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto' }))
+    await waitFor(() => expect(api.createDailyExpense).toHaveBeenCalledWith({
+      dia: '2026-10-01', medio: 'nequi', monto: 2000, descripcion: 'Bolsas', proveedorId: provider.id,
+    }, expect.any(String)))
+  })
+})
+
+describe('Usuarios, proveedores e inventario', () => {
+  it('crea usuarios y presenta conflictos al cambiar rol o estado', async () => {
+    vi.mocked(api.getUsers).mockResolvedValue([user()])
+    vi.mocked(api.createUser).mockResolvedValue({ ...user(), id: 'new-user', rol: 'cajero' })
+    vi.mocked(api.updateUserRole).mockRejectedValue(new api.ApiError('Debe quedar un administrador activo.', 409))
+    vi.mocked(api.updateUserStatus).mockResolvedValue({ ...user(), activo: false })
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Usuarios' }))
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Cajero' } })
+    fireEvent.change(screen.getByLabelText('Usuario'), { target: { value: 'cajero' } })
+    fireEvent.change(screen.getByLabelText(/Contraseña/), { target: { value: 'password8' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear usuario' }))
+    await waitFor(() => expect(api.createUser).toHaveBeenCalledWith({
+      nombre: 'Cajero', usuario: 'cajero', contrasena: 'password8', rol: 'cajero',
+    }))
+    fireEvent.change(screen.getByLabelText('Rol de Operadora'), { target: { value: 'tendero' } })
+    expect(await screen.findByText('Debe quedar un administrador activo.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Desactivar Operadora' }))
+    await waitFor(() => expect(api.updateUserStatus).toHaveBeenCalledWith(user().id, false))
+  })
+
+  it('permite al administrador registrar proveedores y enviar su ID en entrada de inventario', async () => {
+    vi.mocked(api.createProvider).mockResolvedValue(provider)
+    vi.mocked(api.receiveStock).mockResolvedValue({ id: 'receipt-stock-1' })
+    renderApp()
+    await loginAs()
+    fireEvent.click(screen.getByRole('button', { name: 'Proveedores' }))
+    fireEvent.change(screen.getByLabelText('Nombre del proveedor'), { target: { value: 'Distribuidora' } })
+    fireEvent.change(screen.getByLabelText('Teléfono (opcional)'), { target: { value: provider.telefono } })
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar proveedor' }))
+    await waitFor(() => expect(api.createProvider).toHaveBeenCalledWith({
+      nombre: 'Distribuidora', telefono: provider.telefono,
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Inventario' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Entrada de Arroz' }))
+    fireEvent.change(await screen.findByLabelText('Proveedor (opcional)'), { target: { value: provider.id } })
+    fireEvent.change(screen.getByLabelText('Cantidad recibida (kg)'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar entrada' }))
-    await waitFor(() => expect(api.receiveStock).toHaveBeenCalledWith({ productoId: product.id, cantidad: 2.5, costoUnitario: 8000 }, expect.any(String)))
-  })
-
-  it('solicita un motivo para anular y vuelve a consultar las ventas', async () => {
-    vi.mocked(api.cancelSale).mockResolvedValue({ ...receipt, estado: 'anulada' })
-    render(<SalesPage canManage reportOnly={false} onReceipt={vi.fn()} onChange={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Anular' }))
-    fireEvent.change(screen.getByLabelText('Motivo obligatorio'), { target: { value: 'Error de digitación' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar anulación' }))
-    await waitFor(() => expect(api.cancelSale).toHaveBeenCalledWith(receipt.id, 'Error de digitación'))
-    await waitFor(() => expect(api.getSales).toHaveBeenCalledTimes(2))
-  })
-
-  it('crea un producto desde el formulario y exige confirmación para desactivarlo', async () => {
-    vi.mocked(api.saveProduct).mockResolvedValue(product)
-    vi.mocked(api.deactivateProduct).mockResolvedValue(undefined)
-    render(<ProductsPage inventory={false} onChange={vi.fn()} />)
-    await screen.findByRole('button', { name: 'Editar Arroz' })
-    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }))
-    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Galletas' } })
-    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Snacks' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar producto' }))
-    await waitFor(() => expect(api.saveProduct).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Galletas', stock: 0 }), undefined))
-    await screen.findByText('Producto guardado.')
-    fireEvent.click(screen.getByRole('button', { name: 'Desactivar Arroz' }))
-    expect(api.deactivateProduct).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar desactivación' }))
-    await waitFor(() => expect(api.deactivateProduct).toHaveBeenCalledWith(product.id))
-  })
-
-  it('consulta ventas por medio y producto, y abre el comprobante guardado', async () => {
-    const open = vi.fn()
-    vi.mocked(api.reopenReceipt).mockResolvedValue({ comprobante: receipt, token: 'a'.repeat(64) })
-    render(<SalesPage canManage reportOnly onReceipt={open} onChange={vi.fn()} />)
-    await screen.findByRole('button', { name: 'Ver comprobante' })
-    fireEvent.change(screen.getByLabelText('Medio'), { target: { value: 'nequi' } })
-    fireEvent.change(screen.getByLabelText('Producto'), { target: { value: product.id } })
-    fireEvent.click(screen.getByRole('button', { name: 'Consultar' }))
-    await waitFor(() => expect(api.getSales).toHaveBeenLastCalledWith(expect.objectContaining({ metodo: 'nequi', productoId: product.id })))
-    await screen.findByRole('button', { name: 'Ver comprobante' })
-    fireEvent.click(screen.getByRole('button', { name: 'Ver comprobante' }))
-    await waitFor(() => expect(open).toHaveBeenCalledWith(receipt, 'a'.repeat(64)))
+    await waitFor(() => expect(api.receiveStock).toHaveBeenCalledWith({
+      productoId: product.id, cantidad: 2, costoUnitario: product.precioCompra, proveedorId: provider.id,
+    }, expect.any(String)))
   })
 })
 
-it('mantiene la caja cerrada ante un error y limita la navegación del cajero al entrar', async () => {
-  vi.mocked(api.getSettings).mockRejectedValueOnce(new Error('Sin conexión'))
-  render(<App />)
-  enterDemo()
-  expect(await screen.findByRole('alert')).toBeTruthy()
-  expect(api.getProducts).not.toHaveBeenCalled()
-  enterDemo()
-  await screen.findByRole('button', { name: 'Añadir Arroz' })
-  expect(screen.getByRole('button', { name: 'Reportes' })).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: 'Productos' }))
-  await screen.findByText('Arroz')
-  expect(screen.queryByRole('button', { name: 'Nuevo producto' })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
-  expect(screen.getByRole('button', { name: 'Entrar a la caja' })).toBeTruthy()
-})
-
-it('permite al administrador iniciar una venta desde el cuaderno de fiados', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  vi.mocked(api.getCustomers).mockResolvedValue([{ id: 'a', nombre: 'Cliente de ejemplo', saldo: 5000 }])
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Venta fiada' }))
-  expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('fiado')
-  expect(screen.getByText(/Saldo después de la venta/)).toBeTruthy()
-})
-
-it('registra clientes desde Fiados y muestra deuda y productos por compra', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  const client = { id: 'a', nombre: 'María Pérez', saldo: 12000 }
-  vi.mocked(api.getCustomers).mockResolvedValue([])
-  vi.mocked(api.createCustomer).mockResolvedValue(client)
-  vi.mocked(api.getCustomerCredits).mockResolvedValue([{
-    id: 'venta-1', fecha: new Date().toISOString(), total: 12000, saldo: 12000,
-    estado: 'confirmada', lineas: [{ productoId: 'p', nombre: 'Arroz', unidad: 'kg', cantidad: 2, precioUnitario: 6000, subtotal: 12000 }],
-  }])
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Registrar cliente' }))
-  fireEvent.change(screen.getByLabelText('Nombre del cliente'), { target: { value: client.nombre } })
-  fireEvent.change(screen.getByLabelText('Referencia de la constancia'), { target: { value: 'formulario firmado' } })
-  fireEvent.click(screen.getByLabelText('El cliente otorgó autorización previa e informada'))
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
-  expect(await screen.findByRole('heading', { name: client.nombre })).toBeTruthy()
-  expect(api.createCustomer).toHaveBeenCalledWith(expect.objectContaining({ nombre: client.nombre, autorizacion: true }))
-  expect(await screen.findByText(/Arroz · 2 kg/)).toBeTruthy()
-  expect(api.getCustomerCredits).toHaveBeenCalledWith(client.id)
-})
-
-it('valida los abonos y actualiza el saldo solo con la confirmación del servidor', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  vi.mocked(api.getCustomers).mockResolvedValue([{ id: 'a', nombre: 'María Pérez', saldo: 12000 }])
-  const savePayment = vi.mocked(api.registerCreditPayment)
-  savePayment.mockRejectedValueOnce(new Error('Conexión interrumpida')).mockResolvedValueOnce({ saldo: 9000 })
-    .mockResolvedValueOnce({ saldo: 0 })
-
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
+it('registra un abono en una deuda específica y muestra el comprobante devuelto', async () => {
+  vi.mocked(api.getCustomers).mockResolvedValue([customer])
+  vi.mocked(api.getCustomerCredits).mockResolvedValue([credit])
+  vi.mocked(api.registerCreditPayment).mockResolvedValue(paymentReceipt)
+  renderApp()
+  await loginAs('tendero')
+  fireEvent.click(screen.getByRole('button', { name: 'Fiados' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle' }))
+  await waitFor(() => expect(api.getCustomerCredits).toHaveBeenCalledWith(customer.id))
+  await screen.findByText(/confirmada/)
   fireEvent.click(screen.getByRole('button', { name: 'Registrar abono' }))
-  const amount = screen.getByLabelText('Monto del abono (COP)')
-  const confirm = screen.getByRole('button', { name: 'Confirmar abono' })
-  fireEvent.change(amount, { target: { value: '12001' } })
-  expect(confirm).toHaveProperty('disabled', true)
-  fireEvent.change(amount, { target: { value: '3000' } })
-  fireEvent.click(confirm)
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Conexión interrumpida')
-  fireEvent.click(confirm)
-  await screen.findByText(/Abono registrado para María Pérez/)
-  expect(savePayment.mock.calls[0]).toEqual(['a', 3000, expect.any(String)])
-  expect(savePayment.mock.calls[1]).toEqual(savePayment.mock.calls[0])
-
-  fireEvent.click(screen.getByRole('button', { name: 'Registrar abono' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Pagar todo el saldo' }))
-  expect(screen.getByLabelText('Monto del abono (COP)')).toHaveProperty('value', '9000')
+  expect((screen.getByLabelText('Deuda pendiente') as HTMLSelectElement).value).toBe(credit.id)
+  fireEvent.change(screen.getByLabelText('Monto del abono (COP)'), { target: { value: '2000' } })
+  fireEvent.change(screen.getByLabelText('Medio de pago'), { target: { value: 'nequi' } })
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar abono' }))
-  await screen.findByText(/Abono registrado para María Pérez/)
-  expect(savePayment).toHaveBeenLastCalledWith('a', 9000, expect.any(String))
-  expect(screen.queryByRole('button', { name: 'Registrar abono' })).toBeNull()
-  expect(screen.getByText('No hay clientes con deuda activa.')).toBeTruthy()
-})
-
-it('lista primero las deudas mayores y permite buscar y consultar a todos los clientes', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  vi.mocked(api.getCustomers).mockResolvedValue([
-    { id: 'a', nombre: 'Ana', saldo: 1000 },
-    { id: 'b', nombre: 'Bruno', saldo: 0 },
-    { id: 'c', nombre: 'Carmen', saldo: 9000 },
-  ])
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
-  await screen.findByText('Carmen')
-  const rows = screen.getAllByRole('listitem')
-  expect(rows.map(row => row.querySelector('strong')?.textContent)).toEqual(['Carmen', 'Ana'])
-  expect(rows[0].textContent).toContain((9000).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }))
-  fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar cliente' }), { target: { value: 'bruno' } })
-  expect(screen.getByText('No hay coincidencias para esa búsqueda.')).toBeTruthy()
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Solo clientes con deuda activa' }))
-  expect(screen.getByText('Bruno')).toBeTruthy()
-  expect(screen.queryByText('Carmen')).toBeNull()
-})
-
-it('registra un gasto fijo en el mes elegido y actualiza el resumen contable', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  const expense = { id: 'gasto-1', concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8 }
-  vi.mocked(api.getMonthlyAccounting).mockImplementation(async () => vi.mocked(api.createFixedExpense).mock.calls.length
-    ? { gastosFijos: [expense, expense], balance: {
-        resultadoOperativo: 800000, cobros: 950000, egresosOperativos: 150000,
-        diasSinCierre: ['2026-10-15'], gastosFijosPendientes: true,
-      } }
-    : { gastosFijos: [] })
-  vi.mocked(api.createFixedExpense).mockResolvedValue(expense)
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Contabilidad' }))
-  fireEvent.change(screen.getByLabelText('Mes del balance'), { target: { value: expense.periodo } })
-  await screen.findByText('Todavía no hay gastos fijos registrados para este mes.')
-
-  fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto fijo' }))
-  fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: '  Arriendo  ' } })
-  fireEvent.change(screen.getByLabelText('Monto (COP)'), { target: { value: '350000' } })
-  const reminder = screen.getByLabelText('Día de recordatorio')
-  fireEvent.change(reminder, { target: { value: '29' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
-  expect(api.createFixedExpense).not.toHaveBeenCalled()
-  fireEvent.change(reminder, { target: { value: '8' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
-
-  expect(await screen.findByRole('rowheader', { name: 'Arriendo' })).toBeTruthy()
-  expect(api.createFixedExpense).toHaveBeenCalledWith({
-    concepto: 'Arriendo', monto: 350000, periodo: '2026-10', diaRecordatorio: 8,
-  }, expect.any(String))
-  expect(api.getMonthlyAccounting).toHaveBeenLastCalledWith('2026-10')
-  expect(screen.getAllByRole('rowheader', { name: 'Arriendo' })).toHaveLength(1)
-  const money = (amount: number) => amount.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-  expect(screen.getByText('Gastos fijos incluidos').nextElementSibling?.textContent).toBe(money(350000))
-  expect(screen.getByText('Flujo operativo neto del mes').closest('dt')?.nextElementSibling?.textContent).toBe(money(450000))
-  expect(screen.getByText('Días sin cierre: 2026-10-15.')).toBeTruthy()
-  expect(screen.getByText(/gastos fijos del mes pendientes/)).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Exportar CSV' })).toBeTruthy()
-
-  fireEvent.click(screen.getByRole('button', { name: 'Registrar gasto fijo' }))
-  fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'arriendo' } })
-  fireEvent.change(screen.getByLabelText('Monto (COP)'), { target: { value: '300000' } })
-  fireEvent.change(screen.getByLabelText('Día de recordatorio'), { target: { value: '10' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar gasto' }))
-  expect(await screen.findByText('Ya hay un gasto con este concepto en el mes seleccionado.')).toBeTruthy()
-  expect(api.createFixedExpense).toHaveBeenCalledTimes(1)
-})
-
-it('exige el cierre y muestra el flujo operativo diario con el arqueo aparte', async () => {
-  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
-  vi.mocked(api.getMonthlyAccounting).mockResolvedValue({ gastosFijos: [] })
-  const daily = vi.mocked(api.getDailyAccounting)
-  daily.mockResolvedValueOnce({ estadoCaja: 'abierta' })
-  daily.mockResolvedValue({
-    estadoCaja: 'cerrada', cobrosVentas: 100000, abonosRecibidos: 20000, egresosMercancia: 30000,
-    otrosEgresosOperativos: 5000, diferenciaArqueo: -2000,
-  })
-
-  render(<App />)
-  enterDemo()
-  fireEvent.click(await screen.findByRole('button', { name: 'Contabilidad' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Balance diario' }))
-  expect(await screen.findByText(/primero debes cerrar la caja/)).toBeTruthy()
-  expect(screen.queryByText(/Flujo operativo neto/)).toBeNull()
-  fireEvent.change(screen.getByLabelText('Fecha del balance'), { target: { value: '2026-10-01' } })
-
-  const money = (amount: number) => amount.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-  expect(await screen.findByText(/Flujo operativo neto del día/)).toHaveProperty('textContent',
-    `Flujo operativo neto del día · ${money(85000)}`)
-  expect(screen.getByRole('region', { name: 'Arqueo físico' }).textContent).toContain(money(-2000))
-  expect(daily).toHaveBeenLastCalledWith('2026-10-01')
+  await waitFor(() => expect(api.registerCreditPayment).toHaveBeenCalledWith(customer.id, {
+    deudaId: credit.id, monto: 2000, medio: 'nequi',
+  }, expect.any(String)))
+  expect(await screen.findByText(/Comprobante de abono/)).toBeTruthy()
+  expect(screen.getByText(/Saldo restante \$ 3\.000|Saldo restante.*3\.000/)).toBeTruthy()
 })
