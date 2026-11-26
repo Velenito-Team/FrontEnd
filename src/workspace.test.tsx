@@ -8,7 +8,7 @@ import * as api from './services/api'
 
 vi.mock('./services/api', () => ({
   getProducts: vi.fn(), getSettings: vi.fn(), getReport: vi.fn(), getSales: vi.fn(),
-  getCustomers: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
+  getCustomers: vi.fn(), getCustomerCredits: vi.fn(), createCustomer: vi.fn(), saveProduct: vi.fn(),
   deactivateProduct: vi.fn(), receiveStock: vi.fn(), createInvoice: vi.fn(),
   readReceipt: vi.fn(), reopenReceipt: vi.fn(), cancelSale: vi.fn(),
 }))
@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.mocked(api.getReport).mockResolvedValue(report)
   vi.mocked(api.getSales).mockResolvedValue([receipt])
   vi.mocked(api.getCustomers).mockResolvedValue([])
+  vi.mocked(api.getCustomerCredits).mockResolvedValue([])
   vi.mocked(api.createInvoice).mockResolvedValue({ comprobante: receipt, token: 'a'.repeat(64) })
 })
 afterEach(cleanup)
@@ -213,4 +214,27 @@ it('permite al administrador iniciar una venta desde el cuaderno de fiados', asy
   fireEvent.click(await screen.findByRole('button', { name: 'Venta fiada' }))
   expect((screen.getByLabelText('Medio de pago') as HTMLSelectElement).value).toBe('fiado')
   expect(screen.getByText(/Saldo después de la venta/)).toBeTruthy()
+})
+
+it('registra clientes desde Fiados y muestra deuda y productos por compra', async () => {
+  vi.mocked(api.getSettings).mockResolvedValue({ tienda: 'El Veleñito', caja: '01', usuario: 'admin', operador: 'Tienda', rol: 'administrador', replicaSet: 'rs0', primario: true })
+  const client = { id: 'a', nombre: 'María Pérez', saldo: 12000 }
+  vi.mocked(api.getCustomers).mockResolvedValue([])
+  vi.mocked(api.createCustomer).mockResolvedValue(client)
+  vi.mocked(api.getCustomerCredits).mockResolvedValue([{
+    id: 'venta-1', fecha: new Date().toISOString(), total: 12000, saldo: 12000,
+    estado: 'confirmada', lineas: [{ productoId: 'p', nombre: 'Arroz', unidad: 'kg', cantidad: 2, precioUnitario: 6000, subtotal: 12000 }],
+  }])
+  render(<App />)
+  enterDemo()
+  fireEvent.click(await screen.findByRole('button', { name: 'Fiados' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Registrar cliente' }))
+  fireEvent.change(screen.getByLabelText('Nombre del cliente'), { target: { value: client.nombre } })
+  fireEvent.change(screen.getByLabelText('Referencia de la constancia'), { target: { value: 'formulario firmado' } })
+  fireEvent.click(screen.getByLabelText('El cliente otorgó autorización previa e informada'))
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
+  expect(await screen.findByRole('heading', { name: client.nombre })).toBeTruthy()
+  expect(api.createCustomer).toHaveBeenCalledWith(expect.objectContaining({ nombre: client.nombre, autorizacion: true }))
+  expect(await screen.findByText(/Arroz · 2 kg/)).toBeTruthy()
+  expect(api.getCustomerCredits).toHaveBeenCalledWith(client.id)
 })
