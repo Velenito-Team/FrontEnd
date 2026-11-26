@@ -6,6 +6,7 @@ export default function AccessPage({ onEnter }: { onEnter: (operator: Settings) 
   const [busy, setBusy] = useState(false)
   const [visible, setVisible] = useState(false)
   const [error, setError] = useState('')
+  const [previewAdmin, setPreviewAdmin] = useState(false)
 
   async function enter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -15,7 +16,9 @@ export default function AccessPage({ onEnter }: { onEnter: (operator: Settings) 
     try {
       const operator = await getSettings()
       if (!['administrador', 'cajero'].includes(operator.rol)) throw new Error()
-      onEnter(operator)
+      onEnter(import.meta.env.DEV && previewAdmin
+        ? { ...operator, rol: 'administrador', operador: 'Vista de administrador' }
+        : operator)
     } catch {
       setError('No se pudo abrir la caja. Revisa la conexión y el operador asignado.')
       setBusy(false)
@@ -41,6 +44,10 @@ export default function AccessPage({ onEnter }: { onEnter: (operator: Settings) 
             {visible ? <EyeOff size={20} /> : <Eye size={20} />}
           </button>
         </div>
+        {import.meta.env.DEV && <label className="login-preview">
+          <input type="checkbox" checked={previewAdmin} onChange={event => setPreviewAdmin(event.target.checked)} />
+          Ver interfaz de administrador (demostración local)
+        </label>}
         {error && <p className="notice error" role="alert">{error}</p>}
         <button className="button button-primary login-submit" disabled={busy}>
           {busy ? 'Abriendo caja…' : 'Entrar a la caja'} <ArrowRight size={18} aria-hidden="true" />
