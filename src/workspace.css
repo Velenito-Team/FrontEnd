@@ -231,6 +231,7 @@ fieldset, .catalog-toolbar .search-box { min-width: 0; }
 .login-body .login-preview input { flex: 0 0 18px; width: 18px; height: 18px; margin: 2px 0 0; }
 .credit-page .panel-heading { gap: 16px; }
 .credit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.credit-customers { margin: 8px 0 0; padding: 0; list-style: none; }
 .credit-detail { margin-top: 32px; padding-top: 20px; border-top: 2px solid var(--ink); }
 .credit-detail > p { overflow-wrap: anywhere; }
 .credit-purchase { padding: 18px 0; border-top: 1px solid var(--rule); }

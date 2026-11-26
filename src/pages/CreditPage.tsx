@@ -7,6 +7,7 @@ import { money } from './SalesPage'
 export default function CreditPage({ onSale }: { onSale: (customer: Customer) => void }) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
+  const [onlyOutstanding, setOnlyOutstanding] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
@@ -40,17 +41,27 @@ export default function CreditPage({ onSale }: { onSale: (customer: Customer) =>
     return () => { active = false }
   }, [selected])
 
-  const filtered = customers.filter(customer => customer.nombre.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+  const outstanding = customers.filter(customer => customer.saldo > 0)
+  const visibleCustomers = onlyOutstanding
+    ? outstanding.sort((a, b) => b.saldo - a.saldo || a.nombre.localeCompare(b.nombre, 'es'))
+    : customers
+  const query = search.trim().toLocaleLowerCase('es')
+  const filtered = visibleCustomers.filter(customer => customer.nombre.toLocaleLowerCase('es').includes(query))
   return <section className="panel management-panel credit-page">
     <div className="panel-heading"><div><h2>Cuaderno de fiados</h2><p>Clientes, saldos y compras a crédito.</p></div>
       <button className="button button-primary" onClick={() => setRegistering(true)}>Registrar cliente</button></div>
     {paymentMessage && <p className="notice success" role="status">{paymentMessage}</p>}
     {loading ? <p role="status">Consultando saldos…</p> : error ? <div role="alert">{error} <button className="button" onClick={() => setAttempt(n => n + 1)}>Reintentar</button></div> : <>
       <label className="credit-search">Buscar cliente<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label>
-      {filtered.map(customer => <div className="credit-row" key={customer.id}><div><strong>{customer.nombre}</strong><p>Saldo pendiente · {money(customer.saldo)}</p></div>
+      <label className="check-label"><input type="checkbox" checked={onlyOutstanding}
+        onChange={event => setOnlyOutstanding(event.target.checked)} /> Solo clientes con deuda activa</label>
+      <ul className="credit-customers" aria-label={onlyOutstanding ? 'Clientes con deuda activa' : 'Todos los clientes'}>
+      {filtered.map(customer => <li className="credit-row" key={customer.id}><div><strong>{customer.nombre}</strong><p>Saldo pendiente · {money(customer.saldo)}</p></div>
         <div className="credit-actions"><button className="button button-secondary" onClick={() => setSelected(customer)}>Ver detalle</button>
-          <button className="button button-secondary" onClick={() => onSale(customer)}>Venta fiada</button></div></div>)}
-      {!filtered.length && <p>{customers.length ? 'No hay coincidencias para esa búsqueda.' : 'Todavía no hay clientes registrados.'}</p>}
+          <button className="button button-secondary" onClick={() => onSale(customer)}>Venta fiada</button></div></li>)}
+      </ul>
+      {!filtered.length && <p role="status">{visibleCustomers.length ? 'No hay coincidencias para esa búsqueda.'
+        : onlyOutstanding ? 'No hay clientes con deuda activa.' : 'Todavía no hay clientes registrados.'}</p>}
     </>}
     {selected && <div className="credit-detail" aria-label={`Detalle de ${selected.nombre}`}>
       <div className="panel-heading"><div><h2>{selected.nombre}</h2><p>Saldo pendiente · {money(selected.saldo)}</p></div>
