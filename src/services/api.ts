@@ -44,7 +44,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, init)
   if (!response.ok) {
     const body = await response.json().catch(() => null)
-    throw new Error(body?.message || `Error ${response.status} del backend.`)
+    throw Object.assign(new Error(body?.message || `Error ${response.status} del backend.`), { status: response.status })
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
 }
@@ -89,6 +89,20 @@ export const cancelSale = (id: string, motivo: string) => request<BackendReceipt
 export const getCustomers = () => request<Customer[]>('/api/customers')
 export const getCustomerCredits = (customerId: string) =>
   request<CustomerCredit[]>(`/api/customers/${encodeURIComponent(customerId)}/credits`)
+export async function registerCreditPayment(customerId: string, amount: number, key: string) {
+  const init = json({ monto: amount })
+  try {
+    return await request<{ saldo: number }>(`/api/customers/${encodeURIComponent(customerId)}/payments`, {
+      ...init, headers: { ...init.headers, 'Idempotency-Key': key },
+    })
+  } catch (error) {
+    const status = (error as { status?: number }).status
+    if (status === 404 || status === 405 || status === 501) {
+      throw new Error('El servidor todavía no permite registrar abonos.')
+    }
+    throw error
+  }
+}
 export const createCustomer = (customer: { nombre: string; telefono: string; autorizacion: boolean; evidencia: string }) =>
   request<Customer>('/api/customers', json(customer))
 

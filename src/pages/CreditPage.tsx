@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { getCustomerCredits, getCustomers, type Customer, type CustomerCredit } from '../services/api'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { getCustomerCredits, getCustomers, registerCreditPayment, type Customer, type CustomerCredit } from '../services/api'
 import CustomerPicker from '../components/CustomerPicker'
+import Modal from '../components/Modal'
 import { money } from './SalesPage'
 
 export default function CreditPage({ onSale }: { onSale: (customer: Customer) => void }) {
@@ -11,6 +12,8 @@ export default function CreditPage({ onSale }: { onSale: (customer: Customer) =>
   const [attempt, setAttempt] = useState(0)
   const [registering, setRegistering] = useState(false)
   const [selected, setSelected] = useState<Customer | null>(null)
+  const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null)
+  const [paymentMessage, setPaymentMessage] = useState('')
   const [credits, setCredits] = useState<CustomerCredit[]>([])
   const [creditsLoading, setCreditsLoading] = useState(false)
   const [creditsError, setCreditsError] = useState('')
@@ -41,6 +44,7 @@ export default function CreditPage({ onSale }: { onSale: (customer: Customer) =>
   return <section className="panel management-panel credit-page">
     <div className="panel-heading"><div><h2>Cuaderno de fiados</h2><p>Clientes, saldos y compras a crédito.</p></div>
       <button className="button button-primary" onClick={() => setRegistering(true)}>Registrar cliente</button></div>
+    {paymentMessage && <p className="notice success" role="status">{paymentMessage}</p>}
     {loading ? <p role="status">Consultando saldos…</p> : error ? <div role="alert">{error} <button className="button" onClick={() => setAttempt(n => n + 1)}>Reintentar</button></div> : <>
       <label className="credit-search">Buscar cliente<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label>
       {filtered.map(customer => <div className="credit-row" key={customer.id}><div><strong>{customer.nombre}</strong><p>Saldo pendiente · {money(customer.saldo)}</p></div>
@@ -50,7 +54,13 @@ export default function CreditPage({ onSale }: { onSale: (customer: Customer) =>
     </>}
     {selected && <div className="credit-detail" aria-label={`Detalle de ${selected.nombre}`}>
       <div className="panel-heading"><div><h2>{selected.nombre}</h2><p>Saldo pendiente · {money(selected.saldo)}</p></div>
-        <button className="button button-secondary" onClick={() => setSelected(null)}>Cerrar detalle</button></div>
+        <div className="credit-actions">
+          {selected.saldo > 0 && <button className="button button-primary" onClick={() => {
+            setPaymentMessage('')
+            setPaymentCustomer(selected)
+          }}>Registrar abono</button>}
+          <button className="button button-secondary" onClick={() => setSelected(null)}>Cerrar detalle</button>
+        </div></div>
       {selected.telefono && <p>Teléfono · {selected.telefono}</p>}
       {creditsLoading ? <p role="status">Consultando compras fiadas…</p> : creditsError ? <p role="status">{creditsError}</p> :
         credits.length ? credits.map(credit => <article className="credit-purchase" key={credit.id}>
@@ -65,5 +75,61 @@ export default function CreditPage({ onSale }: { onSale: (customer: Customer) =>
       setRegistering(false)
       if (customer) { setCustomers(current => [...current, customer].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))); setSelected(customer) }
     }} />}
+    {paymentCustomer && <CreditPayment customer={paymentCustomer} onClose={() => setPaymentCustomer(null)}
+      onSaved={saldo => {
+        const updated = { ...paymentCustomer, saldo }
+        setCustomers(current => current.map(customer => customer.id === updated.id ? updated : customer))
+        setSelected(updated)
+        setPaymentCustomer(null)
+        setPaymentMessage(`Abono registrado para ${updated.nombre}. Saldo pendiente: ${money(saldo)}.`)
+      }} />}
   </section>
+}
+
+function CreditPayment({ customer, onClose, onSaved }: {
+  customer: Customer; onClose: () => void; onSaved: (balance: number) => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const operation = useRef<{ amount: number; key: string }>()
+  const value = Number(amount)
+  const valid = Number.isSafeInteger(value) && value > 0 && value <= customer.saldo
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!valid || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (operation.current?.amount !== value) {
+        operation.current = { amount: value, key: crypto.randomUUID() }
+      }
+      const result = await registerCreditPayment(customer.id, value, operation.current.key)
+      if (!result || !Number.isSafeInteger(result.saldo) || result.saldo < 0) {
+        throw new Error('El servidor no devolvió un saldo válido. Vuelve a consultar el saldo antes de registrar otro abono.')
+      }
+      onSaved(result.saldo)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo confirmar el abono.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <Modal title={`Registrar abono · ${customer.nombre}`} onClose={() => { if (!busy) onClose() }}>
+    <p>Saldo pendiente · {money(customer.saldo)}</p>
+    <form className="data-form" onSubmit={submit}>
+      <label>Monto del abono (COP)
+        <input type="number" min="1" max={customer.saldo} step="1" required disabled={busy}
+          value={amount} onChange={event => { setAmount(event.target.value); setError('') }} />
+      </label>
+      <button type="button" className="button button-secondary" disabled={busy}
+        onClick={() => { setAmount(String(customer.saldo)); setError('') }}>Pagar todo el saldo</button>
+      {amount && !valid && <p role="status">Ingresa un monto entero entre {money(1)} y {money(customer.saldo)}.</p>}
+      {valid && <p>Saldo después del abono · <strong>{money(customer.saldo - value)}</strong></p>}
+      {error && <p role="alert" className="notice error">{error}</p>}
+      <button className="button button-primary" disabled={!valid || busy}>{busy ? 'Registrando…' : 'Confirmar abono'}</button>
+    </form>
+  </Modal>
 }
