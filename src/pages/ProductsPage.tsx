@@ -29,7 +29,7 @@ export default function ProductsPage({ inventory, onChange, canManage = true }: 
     && `${p.nombre} ${p.categoria}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
   return <section className="panel management-panel">
     <div className="panel-heading"><h2>{inventory ? 'Existencias y entradas' : 'Productos'}</h2>
-      {canManage && <button className="button button-primary" onClick={() => setEditing('new')}>Nuevo producto</button>}</div>
+      <button className="button button-primary" onClick={() => setEditing('new')}>Nuevo producto</button></div>
     <div className="filters"><label>Buscar producto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
       <label className="check-label"><input type="checkbox" checked={low} onChange={e => setLow(e.target.checked)} /> Stock bajo</label>
       <label className="check-label"><input type="checkbox" checked={inactive} onChange={e => setInactive(e.target.checked)} /> Incluir inactivos</label>
