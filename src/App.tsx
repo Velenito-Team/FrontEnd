@@ -19,7 +19,6 @@ import {
   ArrowRight,
   BarChart3,
   Bell,
-  Boxes,
   Camera,
   Check,
   ChevronDown,
@@ -220,7 +219,7 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
   const [bestSelling, setBestSelling] = useState(false)
   const [ranking, setRanking] = useState<Record<string, number>>({})
   const searchInput = useRef<HTMLInputElement>(null)
-  const navigate = (next: string) => { if (!saving && (admin || ['Ventas', 'Configuración'].includes(next))) { setPage(next); setHistory(false) } }
+  const navigate = (next: string) => { if (!saving && (next !== 'Fiados' || admin)) { setPage(next); setHistory(false) } }
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [catalogError, setCatalogError] = useState('')
   const [activeCategory, setActiveCategory] = useState<Category>('Todos')
@@ -243,11 +242,10 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
       setCatalogProducts(items.filter((item) => item.activo).map(mapBackendProduct))
       setCatalogError('')
     }).catch(() => setCatalogError('No se pudo cargar el catálogo. Revisa tu conexión y pulsa Reintentar.'))
-    if (!admin) return
     const start = new Date(); start.setDate(start.getDate() - 30)
     getReport({ desde: start.toISOString().slice(0, 10), hasta: today() }).then(report =>
       setRanking(Object.fromEntries(report.productos.map(p => [p.productoId, p.cantidad])))).catch(() => undefined)
-  }, [admin])
+  }, [])
 
   useEffect(refreshProducts, [refreshProducts])
   useEffect(() => {
@@ -379,14 +377,16 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
           <div><span className="brand-name">El <span>Veleñito</span></span><small>Punto de venta de barrio</small></div>
         </div>
 
+        <div className="sede"><strong>{operator.tienda}</strong><span>Sede principal · {operator.caja}</span></div>
         <nav className="main-nav" aria-label="Navegación principal">
           <p className="nav-label">Menú principal</p>
-          {admin && <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>}
+          <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>
           <button className={page === 'Ventas' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Ventas')}><ShoppingCart size={18} /> Ventas</button>
-          {admin && <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>}
-          {admin && <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>}
+          <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>
+          <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>
           {admin && <button className={page === 'Fiados' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Fiados')}><BookOpen size={18} /> Fiados</button>}
-          {admin && <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>}
+          <p className="nav-label nav-label-spaced">Administración</p>
+          <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>
           <button className={page === 'Configuración' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Configuración')}><Settings size={18} /> Configuración</button>
         </nav>
 
@@ -400,25 +400,21 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>{page}</span><ChevronDown size={14} /><strong>{page === 'Ventas' ? history ? 'Historial' : 'Nueva venta' : 'Tienda El Veleñito'}</strong></div>
-          <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div>{admin && <button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button>}<button className="button button-secondary" disabled={saving} onClick={() => { if (!cart.length || window.confirm('¿Salir y descartar la venta en curso?')) onExit() }}>Salir</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+          <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div><button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button><button className="button button-secondary" disabled={saving} onClick={() => { if (!cart.length || window.confirm('¿Salir y descartar la venta en curso?')) onExit() }}>Salir</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
         </header>
 
         <div className="page-heading">
           {page !== 'Ventas' ? <div><h1>{page}</h1><p className="heading-copy">Tienda El Veleñito · Caja 01</p></div> : <>
           <div><p className="eyebrow">Punto de venta <span></span> Caja 01</p><h1>{history ? 'Historial de ventas' : 'Nueva venta'}</h1><p className="heading-copy">Selecciona los productos y confirma el cobro.</p></div>
-          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer comprobante QR</button>{admin && <button className="button button-secondary" onClick={() => setHistory(current => !current)}>{history ? 'Volver a venta' : 'Historial'}</button>}<button disabled={saving} className="button button-primary" onClick={() => { setCart([]); setReceived(''); setCustomer(null); setCapacityError(''); setHistory(false) }}><FilePlus2 size={17} /> Nueva venta</button></div>
+          <div className="heading-actions"><button className="button button-secondary" onClick={() => setReaderOpen(true)}><FileScan size={17} /> Leer comprobante QR</button><button className="button button-secondary" onClick={() => setHistory(current => !current)}>{history ? 'Volver a venta' : 'Historial'}</button><button disabled={saving} className="button button-primary" onClick={() => { setCart([]); setReceived(''); setCustomer(null); setCapacityError(''); setHistory(false) }}><FilePlus2 size={17} /> Nueva venta</button></div>
           </>}
         </div>
 
         {page === 'Ventas' && !history && <>
-        <section className="metric-row" aria-label="Resumen del negocio">
-          <MetricCard icon={<Boxes size={18} />} label="Productos activos" value={String(catalogProducts.length)} delta={`${catalogProducts.filter((p) => p.lowStock).length} por reponer`} color="gold" />
-        </section>
-
         <div className="workspace-grid">
           <section className="catalog-panel panel">
-            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>Selecciona un producto para añadirlo a la venta.</p></div>{admin && <button className="text-button" onClick={() => navigate('Productos')}>Ver catálogo <ArrowRight size={15} /></button>}</div>
-            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>Ctrl K</kbd></label>{admin && <button className="filter-button" aria-pressed={bestSelling} onClick={() => setBestSelling(value => !value)}><span className="filter-dot"></span> {bestSelling ? 'Orden: más vendidos' : 'Más vendidos'}</button>}<label className="check-label"><input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} /> Stock bajo</label></div>
+            <div className="panel-heading"><div><h2>Catálogo de productos</h2><p>{catalogProducts.length} productos activos · {catalogProducts.filter(p => p.lowStock).length} por reponer</p></div><button className="text-button" onClick={() => navigate('Productos')}>Ver catálogo <ArrowRight size={15} /></button></div>
+            <div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto o SKU..." /><kbd>Ctrl K</kbd></label><button className="filter-button" aria-pressed={bestSelling} onClick={() => setBestSelling(value => !value)}><span className="filter-dot"></span> {bestSelling ? 'Orden: más vendidos' : 'Más vendidos'}</button><label className="check-label"><input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} /> Stock bajo</label></div>
             <div className="category-tabs">{categories.map((category) => <button key={category} className={activeCategory === category ? 'category-tab active' : 'category-tab'} onClick={() => setActiveCategory(category)}>{category}<span>{category === 'Todos' ? catalogProducts.length : catalogProducts.filter((p) => p.category === category).length}</span></button>)}</div>
             <div className="product-grid">{filteredProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={(item) => updateQuantity(item.id, 1)} />)}</div>
             {catalogError && <div className="capacity-error" role="alert">{catalogError} <button onClick={refreshProducts}>Reintentar</button></div>}
@@ -447,7 +443,7 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
         </>}
         {page === 'Fiados' && admin && <CreditPage onSale={c => { setCustomer(c); setMethod('fiado'); navigate('Ventas') }} />}
         {page === 'Resumen' && <OverviewPage onNavigate={navigate} />}
-        {(page === 'Productos' || page === 'Inventario') && <ProductsPage key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
+        {(page === 'Productos' || page === 'Inventario') && <ProductsPage canManage={admin} key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
         {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage canManage={admin} key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
         {page === 'Configuración' && <SettingsPage onSaved={p => { setPreferences(p); setMethod(p.method); setLowOnly(p.lowOnly) }} />}
       </main>
@@ -469,10 +465,6 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
   )
 }
 
-function MetricCard({ icon, label, value, delta, positive, color }: { icon: React.ReactNode; label: string; value: string; delta: string; positive?: boolean; color: string }) {
-  return <div className="metric-card"><div className={`metric-icon ${color}`}>{icon}</div><div className="metric-info"><span>{label}</span><strong>{value}</strong></div><div className={positive ? 'metric-delta positive' : 'metric-delta'}>{positive && '↗ '}{delta}</div></div>
-}
-
 function mapBackendProduct(product: BackendProduct): Product {
   return {
     id: product.id,
@@ -489,11 +481,15 @@ function mapBackendProduct(product: BackendProduct): Product {
 }
 
 function ProductCard({ product, onAdd }: { product: Product; onAdd: (product: Product) => void }) {
-  return <article className="product-card" onClick={() => onAdd(product)}><div className={`product-art ${product.color}`}><span>{product.icon}</span>{product.tag && <em>{product.tag}</em>}<button className="quick-add" onClick={(event) => { event.stopPropagation(); onAdd(product) }} aria-label={`Añadir ${product.name}`}><Plus size={17} /></button></div><div className="product-info"><div><span className="product-category">{product.category}</span><h3>{product.name}</h3></div><strong>{money(product.price)}</strong></div><div className="product-meta"><span>SKU {product.id}</span><span className={product.lowStock ? 'low-stock' : ''}><i></i>{product.stock} {product.unit} disponibles</span></div></article>
+  return <button type="button" className="catalog-line" aria-label={`Añadir ${product.name}`} onClick={() => onAdd(product)}>
+    <span className="line-description"><strong>{product.name}</strong><small>{product.category} · SKU {product.id}</small></span>
+    <span className={product.lowStock ? 'line-stock low-stock' : 'line-stock'}>{product.stock} {product.unit}{product.lowStock && ' · Stock bajo'}</span>
+    <strong className="line-price">{money(product.price)}</strong><Plus aria-hidden="true" size={19} />
+  </button>
 }
 
 function CartRow({ item, onChange, onRemove }: { item: CartItem; onChange: (id: string, delta: number) => void; onRemove: (id: string) => void }) {
-  return <div className="cart-row"><div className={`cart-thumb ${item.color}`}>{item.icon}</div><div className="cart-product"><strong>{item.name}</strong><span>{money(item.price)} / {item.unit}</span></div><div className="quantity-control"><button onClick={() => onChange(item.id, -1)} aria-label="Reducir cantidad"><Minus size={13} /></button><input aria-label={`Cantidad de ${item.name}`} type="number" min={item.fractionable ? '0.001' : '1'} step={item.fractionable ? '0.001' : '1'}
+  return <div className="cart-row"><div className="cart-product"><strong>{item.name}</strong><span>{money(item.price)} / {item.unit}</span></div><div className="quantity-control"><button onClick={() => onChange(item.id, -1)} aria-label="Reducir cantidad"><Minus size={13} /></button><input aria-label={`Cantidad de ${item.name}`} type="number" min={item.fractionable ? '0.001' : '1'} step={item.fractionable ? '0.001' : '1'}
     value={item.quantity} onChange={event => {
       const quantity = +event.target.value
       if (Number.isFinite(quantity) && quantity > 0 && (!item.fractionable ? Number.isInteger(quantity) : Math.round(quantity * 1000) === quantity * 1000))

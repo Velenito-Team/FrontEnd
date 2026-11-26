@@ -75,7 +75,7 @@
 
 .device-view-brand strong {
   color: #122c51;
-  font: 800 14px 'Manrope', sans-serif;
+  font: 800 14px var(--store-font);
   letter-spacing: -0.3px;
 }
 
@@ -186,7 +186,7 @@
 .device-invoice-info strong {
   margin-top: 4px;
   color: #122c51;
-  font: 800 14px 'Manrope', sans-serif;
+  font: 800 14px var(--store-font);
 }
 
 .device-view-footer > p {

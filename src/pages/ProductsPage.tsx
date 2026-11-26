@@ -6,7 +6,7 @@ const empty: ProductInput = { nombre: '', categoria: '', precioCompra: 1, precio
   unidad: 'unidad', stock: 0, activo: true, fraccionable: false }
 const money = (value: number) => value.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
-export default function ProductsPage({ inventory, onChange }: { inventory: boolean; onChange: () => void }) {
+export default function ProductsPage({ inventory, onChange, canManage = true }: { canManage?: boolean; inventory: boolean; onChange: () => void }) {
   const [products, setProducts] = useState<BackendProduct[]>([])
   const [query, setQuery] = useState('')
   const [low, setLow] = useState(false)
@@ -29,7 +29,7 @@ export default function ProductsPage({ inventory, onChange }: { inventory: boole
     && `${p.nombre} ${p.categoria}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
   return <section className="panel management-panel">
     <div className="panel-heading"><h2>{inventory ? 'Existencias y entradas' : 'Productos'}</h2>
-      <button className="button button-primary" onClick={() => setEditing('new')}>Nuevo producto</button></div>
+      {canManage && <button className="button button-primary" onClick={() => setEditing('new')}>Nuevo producto</button>}</div>
     <div className="filters"><label>Buscar producto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
       <label className="check-label"><input type="checkbox" checked={low} onChange={e => setLow(e.target.checked)} /> Stock bajo</label>
       <label className="check-label"><input type="checkbox" checked={inactive} onChange={e => setInactive(e.target.checked)} /> Incluir inactivos</label>
@@ -37,14 +37,14 @@ export default function ProductsPage({ inventory, onChange }: { inventory: boole
     {error && <p className="notice error" role="alert">{error}</p>}
     {message && <p className="notice success" role="status">{message}</p>}
     {loading ? <p role="status">Cargando productos…</p> : <div className="table-scroll"><table>
-      <thead><tr><th>Producto</th><th>Categoría</th><th>Precio venta</th><th>Stock</th><th>Umbral</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Producto</th><th>Categoría</th><th>Precio venta</th><th>Stock</th><th>Umbral</th><th>Estado</th>{canManage && <th>Acciones</th>}</tr></thead>
       <tbody>{filtered.map(p => <tr key={p.id}><td>{p.nombre}</td><td>{p.categoria}</td><td>{money(p.precioVenta)}</td>
         <td className={p.umbralMinimo != null && p.stock <= p.umbralMinimo ? 'low-stock' : ''}>{p.stock} {p.unidad}</td>
-        <td>{p.umbralMinimo ?? '—'}</td><td>{p.activo ? 'Activo' : 'Inactivo'}</td><td className="row-actions">
+        <td>{p.umbralMinimo ?? '—'}</td><td>{p.activo ? 'Activo' : 'Inactivo'}</td>{canManage && <td className="row-actions">
           <button onClick={() => setEditing(p)} aria-label={`Editar ${p.nombre}`}>Editar</button>
           {inventory && <button onClick={() => setEntry(p)} aria-label={`Entrada de ${p.nombre}`}>Registrar entrada</button>}
           {p.activo && <button onClick={() => setConfirmation(p)} aria-label={`Desactivar ${p.nombre}`}>Desactivar</button>}
-        </td></tr>)}</tbody>
+        </td>}</tr>)}</tbody>
     </table>{!filtered.length && <p>No hay productos con estos filtros.</p>}</div>}
     {editing && <ProductEditor product={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
       onSaved={async () => { setEditing(null); await changed('Producto guardado.') }} />}
