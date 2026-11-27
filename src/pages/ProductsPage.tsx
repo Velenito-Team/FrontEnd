@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { getProducts, saveProduct, deactivateProduct, receiveStock, type BackendProduct, type ProductInput } from '../services/api'
+import {
+  getProducts,
+  getProviders,
+  saveProduct,
+  deactivateProduct,
+  receiveStock,
+  type BackendProduct,
+  type ProductInput,
+  type Provider,
+} from '../services/api'
 import Modal from '../components/Modal'
 
 const empty: ProductInput = { nombre: '', categoria: '', precioCompra: 1, precioVenta: 1,
@@ -97,22 +106,46 @@ function ProductEditor({ product, onClose, onSaved }: {
 function StockEntry({ product, onClose, onSaved }: { product: BackendProduct; onClose: () => void; onSaved: () => Promise<void> }) {
   const [quantity, setQuantity] = useState('1')
   const [cost, setCost] = useState(String(product.precioCompra))
+  const [providerId, setProviderId] = useState('')
+  const [providers, setProviders] = useState<Provider[]>([])
+  const [providersError, setProvidersError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const operation = useRef({ fingerprint: '', key: '' })
+  useEffect(() => {
+    let active = true
+    getProviders()
+      .then(items => { if (active) setProviders(items) })
+      .catch(failure => {
+        if (active) setProvidersError(failure instanceof Error ? failure.message : 'No se pudieron consultar los proveedores.')
+      })
+    return () => { active = false }
+  }, [])
   return <Modal title={`Entrada de ${product.nombre}`} onClose={() => { if (!busy) onClose() }}>
     <form className="data-form" onSubmit={async e => {
       e.preventDefault(); setBusy(true); setError('')
-      const fingerprint = `${quantity}:${cost}`
+      const fingerprint = `${quantity}:${cost}:${providerId}`
       if (operation.current.fingerprint !== fingerprint) operation.current = { fingerprint, key: crypto.randomUUID() }
       try {
-        await receiveStock({ productoId: product.id, cantidad: +quantity, costoUnitario: +cost }, operation.current.key)
+        await receiveStock({
+          productoId: product.id,
+          cantidad: +quantity,
+          costoUnitario: +cost,
+          ...(providerId ? { proveedorId: providerId } : {}),
+        }, operation.current.key)
         await onSaved()
       } catch(e) { setError((e as Error).message) } finally { setBusy(false) }
     }}>
       <label>Cantidad recibida ({product.unidad})<input required type="number" min={product.fraccionable ? '0.001' : '1'}
         step={product.fraccionable ? '0.001' : '1'} value={quantity} onChange={e => setQuantity(e.target.value)} /></label>
       <label>Costo por {product.unidad}<input required type="number" min="0.001" step="0.001" value={cost} onChange={e => setCost(e.target.value)} /></label>
+      <label>Proveedor (opcional)
+        <select value={providerId} disabled={busy} onChange={e => setProviderId(e.target.value)}>
+          <option value="">Sin proveedor</option>
+          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.nombre}</option>)}
+        </select>
+      </label>
+      {providersError && <p role="alert" className="notice error">{providersError}</p>}
       <p>La recepción aumenta el stock. El costo recibido queda guardado en su historial.</p>
       {error && <p role="alert" className="notice error">{error}</p>}
       <button className="button button-primary" disabled={busy}>Confirmar entrada</button>

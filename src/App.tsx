@@ -3,17 +3,21 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import jsQR from 'jsqr'
 import { QRCodeCanvas } from 'qrcode.react'
-import { createInvoice as createBackendInvoice, getProducts, getReport, readReceipt, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer, type Settings as OperatorSettings } from './services/api'
+import { createInvoice as createBackendInvoice, getProducts, getReport, readReceipt, type AuthUser, type BackendProduct, type BackendReceipt, type BackendInvoice, type Customer } from './services/api'
 import AccessPage from './pages/AccessPage'
 import CreditPage from './pages/CreditPage'
 import AccountingPage from './pages/AccountingPage'
-import { Store, BookOpen, Calculator } from 'lucide-react'
+import CashClosingPage from './pages/CashClosingPage'
+import ProvidersPage from './pages/ProvidersPage'
+import UsersPage from './pages/UsersPage'
+import { Store, BookOpen, Calculator, Truck, UsersRound, Wallet } from 'lucide-react'
 import ProductsPage from './pages/ProductsPage'
 import SalesPage, { today } from './pages/SalesPage'
 import OverviewPage from './pages/OverviewPage'
 import SettingsPage, { readPreferences } from './pages/SettingsPage'
 import CustomerPicker from './components/CustomerPicker'
 import Modal from './components/Modal'
+import { useAuth } from './hooks/useAuth'
 import './workspace.css'
 import {
   Archive,
@@ -194,19 +198,25 @@ function PublicReceipt({ token }: { token: string }) {
 }
 
 function App() {
+  const { operator, isAuthenticated, logout } = useAuth()
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
     const changed = () => setHash(window.location.hash)
     window.addEventListener('hashchange', changed)
     return () => window.removeEventListener('hashchange', changed)
   }, [])
-  const [operator, setOperator] = useState<OperatorSettings>()
   const token = linkToken(hash)
-  return hash.startsWith('#comprobante/') ? <PublicReceipt token={token ?? ''} /> : operator ? <PointOfSale operator={operator} onExit={() => setOperator(undefined)} /> : <AccessPage onEnter={setOperator} />
+  return hash.startsWith('#comprobante/')
+    ? <PublicReceipt token={token ?? ''} />
+    : isAuthenticated && operator
+      ? <PointOfSale operator={operator} onExit={() => void logout()} />
+      : <AccessPage />
 }
 
-function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit: () => void }) {
+function PointOfSale({ operator, onExit }: { operator: AuthUser; onExit: () => void }) {
+  const { authNotice, clearAuthNotice } = useAuth()
   const admin = operator.rol === 'administrador'
+  const canManage = operator.rol === 'administrador' || operator.rol === 'tendero'
   const [page, setPage] = useState('Ventas')
   const [history, setHistory] = useState(false)
   const [preferences, setPreferences] = useState(readPreferences)
@@ -220,7 +230,12 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
   const [bestSelling, setBestSelling] = useState(false)
   const [ranking, setRanking] = useState<Record<string, number>>({})
   const searchInput = useRef<HTMLInputElement>(null)
-  const navigate = (next: string) => { if (!saving && (admin || !['Fiados', 'Contabilidad'].includes(next))) { setPage(next); setHistory(false) } }
+  const navigate = (next: string) => {
+    const permitted = ['Ventas', 'Productos', 'Resumen', 'Reportes', 'Configuración', 'Inventario', 'Proveedores'].includes(next)
+      || (['Fiados', 'Caja', 'Contabilidad'].includes(next) && canManage)
+      || (next === 'Usuarios' && admin)
+    if (!saving && permitted) { setPage(next); setHistory(false) }
+  }
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [catalogError, setCatalogError] = useState('')
   const [activeCategory, setActiveCategory] = useState<Category>('Todos')
@@ -378,23 +393,26 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
           <div><span className="brand-name">El <span>Veleñito</span></span><small>Punto de venta de barrio</small></div>
         </div>
 
-        <div className="sede"><strong>{operator.tienda}</strong><span>Sede principal · {operator.caja}</span></div>
+        <div className="sede"><strong>El Veleñito</strong><span>Sede principal · Caja 01</span></div>
         <nav className="main-nav" aria-label="Navegación principal">
           <p className="nav-label">Menú principal</p>
           <button className={page === 'Resumen' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Resumen')}><LayoutDashboard size={18} /> Resumen</button>
           <button className={page === 'Ventas' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Ventas')}><ShoppingCart size={18} /> Ventas</button>
           <button className={page === 'Productos' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Productos')}><Package size={18} /> Productos</button>
           <button className={page === 'Reportes' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Reportes')}><BarChart3 size={18} /> Reportes</button>
-          {admin && <button className={page === 'Fiados' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Fiados')}><BookOpen size={18} /> Fiados</button>}
-          {admin && <button className={page === 'Contabilidad' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Contabilidad')}><Calculator size={18} /> Contabilidad</button>}
+          {canManage && <button className={page === 'Fiados' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Fiados')}><BookOpen size={18} /> Fiados</button>}
+          {canManage && <button className={page === 'Caja' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Caja')}><Wallet size={18} /> Caja</button>}
+          {canManage && <button className={page === 'Contabilidad' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Contabilidad')}><Calculator size={18} /> Contabilidad</button>}
           <p className="nav-label nav-label-spaced">Administración</p>
           <button className={page === 'Inventario' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Inventario')}><Archive size={18} /> Inventario</button>
+          <button className={page === 'Proveedores' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Proveedores')}><Truck size={18} /> Proveedores</button>
+          {admin && <button className={page === 'Usuarios' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Usuarios')}><UsersRound size={18} /> Usuarios</button>}
           <button className={page === 'Configuración' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('Configuración')}><Settings size={18} /> Configuración</button>
         </nav>
 
         <div className="sidebar-bottom">
           <div className="help-card" role="button" tabIndex={0} onClick={() => setHelp(true)} onKeyDown={e => { if (e.key === 'Enter') setHelp(true) }}><div className="help-icon"><CircleHelp size={17} /></div><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div>
-          <div className="user-profile"><div className="user-avatar">C1</div><div><strong>{operator?.operador ?? 'Caja 01'}</strong><span>{operator?.rol ?? 'Operador'}</span></div><button className="profile-settings" aria-label="Configuración del operador" onClick={() => navigate('Configuración')}><MoreDots /></button></div>
+          <div className="user-profile"><div className="user-avatar">{operator.nombre.slice(0, 2).toLocaleUpperCase('es')}</div><div><strong>{operator.nombre}</strong><span>{operator.rol}</span></div><button className="profile-settings" aria-label="Configuración del operador" onClick={() => navigate('Configuración')}><MoreDots /></button></div>
           <p className="license-note">Software libre bajo GPLv3 · Sin garantía</p>
         </div>
       </aside>
@@ -404,6 +422,11 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
           <div className="breadcrumb"><span>{page}</span><ChevronDown size={14} /><strong>{page === 'Ventas' ? history ? 'Historial' : 'Nueva venta' : 'Tienda El Veleñito'}</strong></div>
           <div className="topbar-actions"><div className="live-status"><span></span> Punto de venta local</div><button className="icon-button" aria-label="Ver alertas de stock" onClick={() => { navigate('Inventario') }}><Bell size={19} />{catalogProducts.some(p => p.lowStock) && <i />}</button><button className="button button-secondary" disabled={saving} onClick={() => { if (!cart.length || window.confirm('¿Salir y descartar la venta en curso?')) onExit() }}>Salir</button><div className="topbar-date">{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
         </header>
+
+        {authNotice && <p className="notice error" role="alert">
+          {authNotice}{' '}
+          <button className="button button-secondary" onClick={clearAuthNotice}>Cerrar aviso</button>
+        </p>}
 
         <div className="page-heading">
           {page !== 'Ventas' ? <div><h1>{page}</h1><p className="heading-copy">Tienda El Veleñito · Caja 01</p></div> : <>
@@ -443,11 +466,14 @@ function PointOfSale({ operator, onExit }: { operator: OperatorSettings; onExit:
           </section>
         </div>
         </>}
-        {page === 'Fiados' && admin && <CreditPage onSale={c => { setCustomer(c); setMethod('fiado'); navigate('Ventas') }} />}
-        {page === 'Contabilidad' && admin && <AccountingPage />}
+        {page === 'Fiados' && canManage && <CreditPage onSale={c => { setCustomer(c); setMethod('fiado'); navigate('Ventas') }} />}
+        {page === 'Caja' && canManage && <CashClosingPage />}
+        {page === 'Contabilidad' && canManage && <AccountingPage />}
+        {page === 'Proveedores' && <ProvidersPage />}
+        {page === 'Usuarios' && admin && <UsersPage />}
         {page === 'Resumen' && <OverviewPage onNavigate={navigate} />}
-        {(page === 'Productos' || page === 'Inventario') && <ProductsPage canManage={admin} key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
-        {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage canManage={admin} key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
+        {(page === 'Productos' || page === 'Inventario') && <ProductsPage canManage={canManage} key={page} inventory={page === 'Inventario'} onChange={refreshProducts} />}
+        {(page === 'Reportes' || page === 'Ventas' && history) && <SalesPage canManage={canManage} key={page} reportOnly={page === 'Reportes'} onReceipt={showReceipt} onChange={refreshProducts} />}
         {page === 'Configuración' && <SettingsPage onSaved={p => { setPreferences(p); setMethod(p.method); setLowOnly(p.lowOnly) }} />}
       </main>
       {customerOpen && <CustomerPicker onClose={() => setCustomerOpen(false)} onSelect={c => { setCustomer(c); setCustomerOpen(false); setMethod(c ? 'fiado' : preferences.method) }} />}
